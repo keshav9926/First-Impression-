@@ -1,0 +1,45 @@
+{
+  "_comment": "Retrieval eval dataset for the currently ingested site (vortexify.ai). Each item: a question + a substring the URL of a CORRECT chunk must contain. Ground truth is URL-level (which page should the answer come from) — coarse but practical to label. Re-ingest vortexify.ai before running, or replace these with questions for whatever site is ingested.",
+  "cases": [
+    {
+      "question": "What does this product do?",
+      "expected_url_contains": "vortexify.ai"
+    },
+    {
+      "question": "How does demand forecasting work?",
+      "expected_url_contains": "demand-forecast"
+    },
+    {
+      "question": "Can it project demand by SKU with accuracy scores?",
+      "expected_url_contains": "demand-forecast"
+    },
+    {
+      "question": "How are materials matched to orders before a shift?",
+      "expected_url_contains": "material-allocation"
+    },
+    {
+      "question": "How does labor scheduling and shift assignment work?",
+      "expected_url_contains": "labor-scheduling"
+    },
+    {
+      "question": "How do I know if inventory is about to run short?",
+      "expected_url_contains": "inventory-risk"
+    },
+    {
+      "question": "What does the load outlook feature do?",
+      "expected_url_contains": "load-outlook"
+    },
+    {
+      "question": "How much does it cost and what plans exist?",
+      "expected_url_contains": "pricing"
+    },
+    {
+      "question": "What connectors or integrations are available?",
+      "expected_url_contains": "vortexify.ai"
+    },
+    {
+      "question": "What is the AI Context tab used for?",
+      "expected_url_contains": "docs"
+    }
+  ]
+}

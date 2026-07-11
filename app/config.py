@@ -47,6 +47,13 @@ class Settings(BaseSettings):
     voyage_api_key: str = ""
     embedding_model: str = "voyage-3.5"
 
+    # --- Retrieval quality (Phase 2) — used by rerank.py + main.py ---
+    rerank_model: str = "rerank-2.5-lite"
+    # Candidates scoring below this after re-ranking are treated as
+    # irrelevant; if NONE clear the bar, /ask answers "no relevant content"
+    # without calling the LLM. Tune with evals/run_retrieval_eval.py.
+    min_relevance: float = 0.4
+
     # --- Vector store (Chroma) — used by store.py ---
     chroma_dir: str = "./chroma_data"  # where Chroma persists vectors on disk
     collection_name: str = "company_docs"

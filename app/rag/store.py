@@ -57,23 +57,44 @@ def replace_all(chunks: list[dict], embeddings: list[list[float]]) -> int:
 
 
 def search(query_embedding: list[float], top_k: int) -> list[dict]:
-    """Return the top_k most similar chunks: [{"text", "url", "distance"}].
+    """Return the top_k most similar chunks: [{"id", "text", "url", "distance"}].
 
     Called by: main.py ask(), with the vector from embeddings.embed_query().
-    Output goes to: qa.answer() (the chunks Claude is allowed to use) and
-    into the API response as the citation list.
+    Output goes to: fusion.rrf() — the "id" is the dedup key that lets fusion
+    recognize when vector search and BM25 found the SAME chunk.
 
     "distance": lower = more similar. Chroma compares the query vector
-    against every stored vector and returns the nearest ones.
+    against every stored vector and returns the nearest ones. top_k is
+    capped at the collection size (Chroma rejects asking for more rows
+    than exist).
     """
     collection = _collection()
-    result = collection.query(query_embeddings=[query_embedding], n_results=top_k)
+    n_results = min(top_k, collection.count())
+    if n_results == 0:
+        return []
+    result = collection.query(query_embeddings=[query_embedding], n_results=n_results)
     hits = []
-    for text, meta, distance in zip(
-        result["documents"][0], result["metadatas"][0], result["distances"][0]
+    for chunk_id, text, meta, distance in zip(
+        result["ids"][0], result["documents"][0], result["metadatas"][0], result["distances"][0]
     ):
-        hits.append({"text": text, "url": meta["url"], "distance": distance})
+        hits.append({"id": chunk_id, "text": text, "url": meta["url"], "distance": distance})
     return hits
+
+
+def all_chunks() -> list[dict]:
+    """Return EVERY stored chunk: [{"id", "text", "url"}] — no ranking.
+
+    Called by: keyword.py search(), which needs the full corpus to build
+    its BM25 index (keyword scoring is relative to the whole collection).
+    """
+    collection = _collection()
+    result = collection.get()  # no filter = everything
+    return [
+        {"id": chunk_id, "text": text, "url": meta["url"]}
+        for chunk_id, text, meta in zip(
+            result["ids"], result["documents"], result["metadatas"]
+        )
+    ]
 
 
 def count() -> int:

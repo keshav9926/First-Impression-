@@ -13,12 +13,16 @@
 #       ├── embeddings.embed_documents(texts)  chunks → vectors (Voyage API)
 #       └── store.replace_all(chunks, vectors) save into Chroma
 #
-#   POST /ask → ask()
+#   POST /ask → ask()   [Phase 2: hybrid retrieval funnel]
 #       ├── _require_keys(voyage=True, llm=True)
 #       ├── store.count()                      empty? → 409 "ingest first"
 #       ├── embeddings.embed_query(question)   question → vector (Voyage API)
-#       ├── store.search(vector, top_k)        nearest chunks from Chroma
-#       └── qa.answer(question, hits)          Claude answers from chunks only
+#       ├── store.search(vector, 20)           vector arm: MEANING matches
+#       ├── keyword.search(question, 20)       BM25 arm: EXACT-WORD matches
+#       ├── fusion.rrf(both, limit=10)         merge rankings (no score mixing)
+#       ├── rerank.rerank(question, cands)     cross-encoder scores 0..1 (Voyage)
+#       ├── min_relevance gate                 all below bar? → refuse, skip LLM
+#       └── qa.answer(question, relevant)      LLM answers from chunks only
 
 import voyageai.error
 from fastapi import FastAPI, HTTPException
@@ -27,7 +31,7 @@ from app.config import settings
 from app.ingestion.chunker import chunk_text
 from app.ingestion.fetcher import crawl
 from app.ingestion.robots import is_allowed
-from app.rag import embeddings, qa, store
+from app.rag import embeddings, fusion, keyword, qa, rerank, store
 from app.schemas import AskRequest, AskResponse, IngestRequest, IngestResponse, Source
 
 app = FastAPI(
@@ -116,15 +120,31 @@ def ingest(request: IngestRequest) -> IngestResponse:
     )
 
 
+# Hybrid retrieval funnel widths: cast wide, then narrow.
+CANDIDATES_PER_RETRIEVER = 20  # each retriever's contribution to fusion
+CANDIDATES_TO_RERANK = 10  # fused list size sent to the (slower) re-ranker
+
+NO_CONTENT_ANSWER = (
+    "The ingested content does not appear to contain information relevant "
+    "to this question, so no grounded answer can be given."
+)
+
+
 @app.post("/ask", response_model=AskResponse)
 def ask(request: AskRequest) -> AskResponse:
     """Answer a question using only the ingested content, with citations.
 
     Called by: the client (you, via /docs or curl).
-    Calls, in order: _require_keys → store.count (guard) →
-                     embeddings.embed_query → store.search → qa.answer
+    Calls, in order (the Phase 2 hybrid retrieval funnel):
+        _require_keys → store.count (guard)
+        → embeddings.embed_query + store.search     (vector arm, top 20)
+        → keyword.search                            (BM25 arm, top 20)
+        → fusion.rrf                                (merge → 10 candidates)
+        → rerank.rerank                             (cross-encoder → top_k scored)
+        → min_relevance threshold                   (all below? → refuse, no LLM call)
+        → qa.answer                                 (LLM, unchanged)
     Request/response shapes: AskRequest / AskResponse in schemas.py.
-    The `sources` list uses the same [n] numbering Claude cites in the
+    The `sources` list uses the same [n] numbering the LLM cites in the
     answer text, so every claim can be traced back to a page.
     """
     _require_keys(voyage=True, llm=True)
@@ -133,17 +153,33 @@ def ask(request: AskRequest) -> AskResponse:
         raise HTTPException(status_code=409, detail="Nothing ingested yet — call /ingest first.")
 
     try:
+        # Recall stage: two retrievers with complementary blind spots.
         query_vector = embeddings.embed_query(request.question)
+        vector_hits = store.search(query_vector, top_k=CANDIDATES_PER_RETRIEVER)
+        keyword_hits = keyword.search(request.question, top_k=CANDIDATES_PER_RETRIEVER)
+
+        # Merge stage: rank-based fusion (no score mixing).
+        candidates = fusion.rrf(vector_hits, keyword_hits, limit=CANDIDATES_TO_RERANK)
+
+        # Precision stage: cross-encoder scores each candidate 0..1.
+        ranked = rerank.rerank(request.question, candidates, top_k=request.top_k)
     except voyageai.error.RateLimitError:
         raise HTTPException(
             status_code=429,
             detail="Voyage free-tier rate limit hit — wait ~20 seconds and ask again.",
         )
-    hits = store.search(query_vector, top_k=request.top_k)
-    answer_text = qa.answer(request.question, hits)
+
+    # The "no relevant content" gate: top-k retrieval ALWAYS returns k chunks,
+    # but the reranker's calibrated score tells us if they're actually about
+    # the question. Nothing clears the bar → honest refusal, zero LLM tokens.
+    relevant = [hit for hit in ranked if hit["relevance"] >= settings.min_relevance]
+    if not relevant:
+        return AskResponse(answer=NO_CONTENT_ANSWER, sources=[])
+
+    answer_text = qa.answer(request.question, relevant)
 
     sources = [
         Source(index=i + 1, url=hit["url"], snippet=hit["text"][:200])
-        for i, hit in enumerate(hits)
+        for i, hit in enumerate(relevant)
     ]
     return AskResponse(answer=answer_text, sources=sources)
