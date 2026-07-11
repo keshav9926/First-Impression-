@@ -26,12 +26,22 @@ class Settings(BaseSettings):
     app_name: str = "First Impression"
     environment: str = "development"  # "development" | "production"
 
-    # --- LLM (Anthropic) — used by qa.py ---
+    # --- LLM provider switch — used by qa.py ---
+    # "gemini" (free tier) or "anthropic" (paid). The rest of the pipeline
+    # doesn't know or care which LLM answers — only qa.py reads this.
+    llm_provider: str = "gemini"
+
+    # --- LLM (Anthropic) — used by qa.py when llm_provider="anthropic" ---
     # Default "" instead of required: lets /health and tests run without keys.
     # Endpoints that need a key check for it and return a clear 503 if absent
     # (see main.py _require_keys).
     anthropic_api_key: str = ""
     claude_model: str = "claude-opus-4-8"
+
+    # --- LLM (Google Gemini) — used by qa.py when llm_provider="gemini" ---
+    # Free-tier key from https://aistudio.google.com (no card required).
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.5-flash"
 
     # --- Embeddings (Voyage AI) — used by embeddings.py ---
     voyage_api_key: str = ""

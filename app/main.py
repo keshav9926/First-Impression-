@@ -14,7 +14,7 @@
 #       └── store.replace_all(chunks, vectors) save into Chroma
 #
 #   POST /ask → ask()
-#       ├── _require_keys(voyage=True, claude=True)
+#       ├── _require_keys(voyage=True, llm=True)
 #       ├── store.count()                      empty? → 409 "ingest first"
 #       ├── embeddings.embed_query(question)   question → vector (Voyage API)
 #       ├── store.search(vector, top_k)        nearest chunks from Chroma
@@ -35,18 +35,22 @@ app = FastAPI(
 )
 
 
-def _require_keys(*, voyage: bool = False, claude: bool = False) -> None:
+def _require_keys(*, voyage: bool = False, llm: bool = False) -> None:
     """Fail with a clear 503 if a needed API key isn't configured.
 
     Called by: ingest() and ask(), as their first line.
     Why: keys default to "" in config.py so /health and tests run without
     them — so endpoints that DO need a key must check explicitly, and a
     descriptive 503 beats a confusing auth error from deep inside an SDK.
+    The llm check looks at whichever provider is active (config.llm_provider).
     """
     if voyage and not settings.voyage_api_key:
         raise HTTPException(status_code=503, detail="VOYAGE_API_KEY is not set in .env")
-    if claude and not settings.anthropic_api_key:
-        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not set in .env")
+    if llm:
+        if settings.llm_provider == "anthropic" and not settings.anthropic_api_key:
+            raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not set in .env")
+        if settings.llm_provider == "gemini" and not settings.gemini_api_key:
+            raise HTTPException(status_code=503, detail="GEMINI_API_KEY is not set in .env")
 
 
 @app.get("/health")
@@ -113,7 +117,7 @@ def ask(request: AskRequest) -> AskResponse:
     The `sources` list uses the same [n] numbering Claude cites in the
     answer text, so every claim can be traced back to a page.
     """
-    _require_keys(voyage=True, claude=True)
+    _require_keys(voyage=True, llm=True)
 
     if store.count() == 0:
         raise HTTPException(status_code=409, detail="Nothing ingested yet — call /ingest first.")
