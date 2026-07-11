@@ -31,3 +31,16 @@ uv run pytest
 ```sh
 docker compose up --build
 ```
+
+## Design decisions (build vs buy)
+
+- **Chunking is hand-written** ([app/ingestion/chunker.py](app/ingestion/chunker.py)) as a
+  deliberate learning artifact — ~60 testable lines whose strategy we fully own.
+  LangChain's splitters (`RecursiveCharacterTextSplitter`, `MarkdownHeaderTextSplitter`)
+  are a drop-in alternative and the reasonable "buy" choice in a production rush;
+  speed is identical (chunking is a negligible share of ingest time) and quality is
+  comparable on clean docs text.
+- **HTML extraction is bought** (`trafilatura`) — the inverse call: stripping
+  boilerplate from arbitrary HTML is genuinely hard, so a battle-tested library wins.
+- Same principle later: LangGraph is used for multi-agent orchestration (hard
+  machinery), while prompts, schemas, and guardrail logic stay hand-written.
