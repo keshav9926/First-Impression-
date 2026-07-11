@@ -52,7 +52,9 @@ class Settings(BaseSettings):
     # Candidates scoring below this after re-ranking are treated as
     # irrelevant; if NONE clear the bar, /ask answers "no relevant content"
     # without calling the LLM. Tune with evals/run_retrieval_eval.py.
-    min_relevance: float = 0.4
+    # 0.45 chosen from the 2026-07-12 eval run on vortexify.ai: lowest
+    # answerable top-score 0.480, highest unanswerable 0.424 → midpoint.
+    min_relevance: float = 0.45
 
     # --- Vector store (Chroma) — used by store.py ---
     chroma_dir: str = "./chroma_data"  # where Chroma persists vectors on disk
