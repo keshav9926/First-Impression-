@@ -24,6 +24,8 @@
 #       ├── min_relevance gate                 all below bar? → refuse, skip LLM
 #       └── qa.answer(question, relevant)      LLM answers from chunks only
 
+import logging
+
 import voyageai.error
 from fastapi import FastAPI, HTTPException
 
@@ -33,6 +35,8 @@ from app.ingestion.fetcher import crawl
 from app.ingestion.robots import is_allowed
 from app.rag import embeddings, fusion, keyword, qa, rerank, store
 from app.schemas import AskRequest, AskResponse, IngestRequest, IngestResponse, Source
+
+logger = logging.getLogger("first_impression")
 
 app = FastAPI(
     title=settings.app_name,
@@ -168,12 +172,32 @@ def ask(request: AskRequest) -> AskResponse:
             status_code=429,
             detail="Voyage free-tier rate limit hit — wait ~20 seconds and ask again.",
         )
+    except voyageai.error.VoyageError as exc:
+        # FAIL CLOSED: if we can't verify relevance (rerank/embed API down,
+        # timeout, 5xx), we refuse to answer rather than degrade to unranked
+        # chunks. Wrong-but-confident is the worst outcome for a system whose
+        # output is shown to third parties; "try again later" is recoverable.
+        logger.error("retrieval failed closed: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="Could not verify retrieval relevance (embedding/rerank API "
+            "error) — refusing to answer rather than guess. Try again shortly.",
+        )
 
     # The "no relevant content" gate: top-k retrieval ALWAYS returns k chunks,
     # but the reranker's calibrated score tells us if they're actually about
     # the question. Nothing clears the bar → honest refusal, zero LLM tokens.
     relevant = [hit for hit in ranked if hit["relevance"] >= settings.min_relevance]
     if not relevant:
+        # Log every refusal with its top score — this stream is eval data:
+        # it shows where the threshold bites and feeds future tuning.
+        top_score = ranked[0]["relevance"] if ranked else 0.0
+        logger.info(
+            "REFUSED (below min_relevance=%.2f): top_score=%.3f question=%r",
+            settings.min_relevance,
+            top_score,
+            request.question,
+        )
         return AskResponse(answer=NO_CONTENT_ANSWER, sources=[])
 
     answer_text = qa.answer(request.question, relevant)
