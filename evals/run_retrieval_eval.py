@@ -48,7 +48,7 @@ def new_pipeline(question: str, query_vector: list[float]) -> list[dict]:
     """Phase 2 retrieval: hybrid → fusion → rerank."""
     vector_hits = store.search(query_vector, top_k=20)
     keyword_hits = keyword.search(question, top_k=20)
-    candidates = fusion.rrf(vector_hits, keyword_hits, limit=10)
+    candidates = fusion.rrf(vector_hits, keyword_hits, limit=10, guaranteed_per_list=3)
     return rerank.rerank(question, candidates, top_k=TOP_K)
 
 

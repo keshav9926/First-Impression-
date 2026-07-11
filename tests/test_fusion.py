@@ -50,3 +50,18 @@ def test_limit_caps_output():
 
 def test_empty_lists_give_empty_output():
     assert rrf([], [], limit=5) == []
+
+
+def test_guaranteed_seat_rescues_single_list_topper():
+    """The 2026-07-12 eval finding, pinned as a test: a chunk ranked #1 by ONE
+    list must reach the output even when consensus chunks fill the limit."""
+    # 5 chunks that BOTH lists rank (mediocre consensus)...
+    consensus = [_hit(f"c{i}") for i in range(5)]
+    # ...and one chunk only the vector arm found — at rank 1.
+    vec_top = _hit("vec-champion")
+
+    without = rrf([vec_top] + consensus, consensus, limit=5)
+    assert "vec-champion" not in {h["id"] for h in without}  # the observed bug
+
+    with_seats = rrf([vec_top] + consensus, consensus, limit=5, guaranteed_per_list=3)
+    assert "vec-champion" in {h["id"] for h in with_seats}  # the fix

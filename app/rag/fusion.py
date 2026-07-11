@@ -21,7 +21,7 @@
 K = 60  # standard RRF damping constant
 
 
-def rrf(*ranked_lists: list[dict], limit: int) -> list[dict]:
+def rrf(*ranked_lists: list[dict], limit: int, guaranteed_per_list: int = 0) -> list[dict]:
     """Fuse any number of ranked hit-lists into one, best-first, deduplicated.
 
     Called by: main.py ask(), with the vector list and the keyword list.
@@ -29,6 +29,16 @@ def rrf(*ranked_lists: list[dict], limit: int) -> list[dict]:
 
     Each hit must carry a unique "id" (set by store.py) — that's how we know
     two lists found the SAME chunk and should add their contributions.
+
+    guaranteed_per_list: each input list's top-N hits are ALWAYS included,
+    even if consensus scoring would drop them. Why (found by eval debugging,
+    2026-07-12): with K=60, a chunk two lists rank mediocrely (~1/78 + 1/73)
+    outscores a chunk ONE list ranks #1 (1/61) — so a vector-rank-1 chunk
+    that BM25's naive tokenizer misses ("shifts" ≠ "shift", no stemming)
+    was eliminated before the reranker ever saw it. Fusion's job is to
+    NOMINATE candidates; the cross-encoder is the judge. Excellence in a
+    single list must reach the judge. Output may exceed `limit` by a few —
+    the reranker's top_k makes the final cut anyway.
     """
     fused: dict[str, dict] = {}  # id -> hit with accumulated "rrf_score"
 
@@ -42,5 +52,15 @@ def rrf(*ranked_lists: list[dict], limit: int) -> list[dict]:
             else:
                 entry["rrf_score"] += contribution
 
-    candidates = sorted(fused.values(), key=lambda h: h["rrf_score"], reverse=True)
-    return candidates[:limit]
+    by_score = sorted(fused.values(), key=lambda h: h["rrf_score"], reverse=True)
+    selected = by_score[:limit]
+    selected_ids = {h["id"] for h in selected}
+
+    # Guaranteed seats: any list's top-N that consensus dropped gets appended.
+    for ranked_list in ranked_lists:
+        for hit in ranked_list[:guaranteed_per_list]:
+            if hit["id"] not in selected_ids:
+                selected.append(fused[hit["id"]])
+                selected_ids.add(hit["id"])
+
+    return selected

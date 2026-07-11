@@ -162,8 +162,12 @@ def ask(request: AskRequest) -> AskResponse:
         vector_hits = store.search(query_vector, top_k=CANDIDATES_PER_RETRIEVER)
         keyword_hits = keyword.search(request.question, top_k=CANDIDATES_PER_RETRIEVER)
 
-        # Merge stage: rank-based fusion (no score mixing).
-        candidates = fusion.rrf(vector_hits, keyword_hits, limit=CANDIDATES_TO_RERANK)
+        # Merge stage: rank-based fusion (no score mixing). Each arm's top-3
+        # are guaranteed through to the reranker — consensus nominates, but
+        # only the cross-encoder judges (see fusion.py for the eval finding).
+        candidates = fusion.rrf(
+            vector_hits, keyword_hits, limit=CANDIDATES_TO_RERANK, guaranteed_per_list=3
+        )
 
         # Precision stage: cross-encoder scores each candidate 0..1.
         ranked = rerank.rerank(request.question, candidates, top_k=request.top_k)
