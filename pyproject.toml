@@ -1,0 +1,34 @@
+# pyproject.toml — single source of truth for project metadata and dependencies.
+# `uv` reads this to create the virtualenv and resolve packages; the resulting
+# uv.lock file pins exact versions so Docker builds are reproducible.
+
+[project]
+name = "first-impression"
+version = "0.1.0"
+description = "AI system that analyzes a startup's public product experience and reports on the new-user journey, with grounded, cited output."
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",           # web framework: routes HTTP requests to Python functions
+    "uvicorn[standard]", # ASGI server that runs the FastAPI app
+    "pydantic-settings", # typed, validated configuration loaded from .env
+    "httpx>=0.28.1",
+    "trafilatura>=2.1.0",
+    "anthropic>=0.116.0",
+    "voyageai>=0.5.0",
+    "chromadb>=1.5.9",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",  # test runner
+    # HTTP client required by FastAPI's TestClient
+    "ruff",    # linter + formatter
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Put the project root on sys.path so tests can `from app.main import app`.
+pythonpath = ["."]

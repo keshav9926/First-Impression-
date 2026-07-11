@@ -1,0 +1,11 @@
+# docker-compose.yml — one-command local run: `docker compose up`.
+# Today it's just the API; later phases can add services (e.g. a vector DB)
+# as additional entries under `services:`.
+
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"   # host:container — the API is reachable at localhost:8000
+    env_file:
+      - .env          # inject local config/secrets without baking them into the image
