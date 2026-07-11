@@ -15,11 +15,21 @@
 # though a question is not phrased like an answer). Passing the wrong type
 # silently degrades retrieval quality — a classic RAG bug.
 
+import time
+
 import voyageai
 
 from app.config import settings
 
-_BATCH_SIZE = 128  # Voyage API limit: max texts per request
+# --- Free-tier pacing ---
+# Without a payment method, Voyage allows 3 requests/minute and 10K tokens/
+# minute. So each batch must stay under ~10K tokens (we approximate tokens
+# with chars: ~4 chars ≈ 1 token → 28K chars ≈ 7K tokens, a safe margin),
+# and batches must be ≥20s apart (3 per minute). Ingest gets slower; it
+# stays free. With a paid account these could be 128 texts / no sleep.
+_MAX_BATCH_TEXTS = 128  # hard API limit: max texts per request
+_MAX_BATCH_CHARS = 28_000  # ~7K tokens — under the free tier's 10K TPM
+_SECONDS_BETWEEN_BATCHES = 21  # free tier: max 3 requests per minute
 
 
 def _client() -> voyageai.Client:
@@ -31,20 +41,42 @@ def _client() -> voyageai.Client:
     return voyageai.Client(api_key=settings.voyage_api_key)
 
 
+def _make_batches(texts: list[str]) -> list[list[str]]:
+    """Group texts into batches that fit BOTH free-tier limits:
+    ≤ _MAX_BATCH_TEXTS texts and ≤ _MAX_BATCH_CHARS characters per batch.
+
+    Called by: embed_documents().
+    """
+    batches: list[list[str]] = []
+    current: list[str] = []
+    current_chars = 0
+    for text in texts:
+        if current and (
+            len(current) >= _MAX_BATCH_TEXTS or current_chars + len(text) > _MAX_BATCH_CHARS
+        ):
+            batches.append(current)
+            current, current_chars = [], 0
+        current.append(text)
+        current_chars += len(text)
+    if current:
+        batches.append(current)
+    return batches
+
+
 def embed_documents(texts: list[str]) -> list[list[float]]:
     """Embed chunks for STORAGE: one vector per chunk, in the same order.
 
     Called by: main.py ingest(), right after chunking.
-    Calls: _client(), then the Voyage API (network call, costs quota).
+    Calls: _make_batches() to fit free-tier limits, then the Voyage API
+    per batch — sleeping between batches to respect the 3-requests/minute cap.
     Output goes to: store.replace_all(), paired back up with its chunks.
-
-    Batched because the API accepts at most 128 texts per request —
-    a big site can produce many hundreds of chunks.
     """
     client = _client()
     vectors: list[list[float]] = []
-    for i in range(0, len(texts), _BATCH_SIZE):
-        batch = texts[i : i + _BATCH_SIZE]
+    batches = _make_batches(texts)
+    for i, batch in enumerate(batches):
+        if i > 0:
+            time.sleep(_SECONDS_BETWEEN_BATCHES)  # pace to 3 requests/minute
         result = client.embed(batch, model=settings.embedding_model, input_type="document")
         vectors.extend(result.embeddings)
     return vectors

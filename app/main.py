@@ -20,6 +20,7 @@
 #       ├── store.search(vector, top_k)        nearest chunks from Chroma
 #       └── qa.answer(question, hits)          Claude answers from chunks only
 
+import voyageai.error
 from fastapi import FastAPI, HTTPException
 
 from app.config import settings
@@ -96,7 +97,16 @@ def ingest(request: IngestRequest) -> IngestResponse:
         for piece in chunk_text(page.text)
     ]
 
-    vectors = embeddings.embed_documents([c["text"] for c in chunks])
+    try:
+        vectors = embeddings.embed_documents([c["text"] for c in chunks])
+    except voyageai.error.RateLimitError:
+        # Free-tier limit hit despite our pacing — tell the caller to retry,
+        # with the right status code (429 = Too Many Requests), not a raw 500.
+        raise HTTPException(
+            status_code=429,
+            detail="Voyage free-tier rate limit hit — wait a minute and retry, "
+            "or ingest with a smaller max_pages.",
+        )
     stored = store.replace_all(chunks, vectors)
 
     return IngestResponse(
@@ -122,7 +132,13 @@ def ask(request: AskRequest) -> AskResponse:
     if store.count() == 0:
         raise HTTPException(status_code=409, detail="Nothing ingested yet — call /ingest first.")
 
-    query_vector = embeddings.embed_query(request.question)
+    try:
+        query_vector = embeddings.embed_query(request.question)
+    except voyageai.error.RateLimitError:
+        raise HTTPException(
+            status_code=429,
+            detail="Voyage free-tier rate limit hit — wait ~20 seconds and ask again.",
+        )
     hits = store.search(query_vector, top_k=request.top_k)
     answer_text = qa.answer(request.question, hits)
 
