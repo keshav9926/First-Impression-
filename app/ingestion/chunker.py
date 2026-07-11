@@ -1,5 +1,9 @@
 # app/ingestion/chunker.py — splits page text into chunks for embedding.
-# Written by hand (no LangChain) because chunking is a core RAG concept:
+# Written by hand (no LangChain) because chunking is a core RAG concept.
+#
+# CALL FLOW:
+#   main.py: ingest() → chunk_text(page.text)   once per crawled page
+#   The chunks then go to embeddings.embed_documents() and store.replace_all().
 #
 # WHY chunk at all? Two reasons:
 #   1. Retrieval precision — an embedding of a whole page averages many topics
@@ -21,11 +25,22 @@ def chunk_text(
     max_chars: int = DEFAULT_MAX_CHARS,
     overlap: int = DEFAULT_OVERLAP,
 ) -> list[str]:
-    """Split text into overlapping chunks of at most ~max_chars characters."""
-    # trafilatura separates blocks with newlines; each block ≈ one paragraph.
+    """Split one page's text into overlapping chunks of at most ~max_chars chars.
+
+    Called by: main.py ingest(), once per page returned by fetcher.crawl().
+    Calls: nothing — pure function (text in, list of strings out; no network,
+    no state). That purity is why tests/test_chunker.py can test it so easily.
+
+    Three stages:
+      1. Split the text into paragraphs (trafilatura separates blocks with \\n).
+      2. Hard-split any monster paragraph that alone exceeds max_chars.
+      3. Greedily pack paragraphs into chunks; when a chunk fills up, emit it
+         and start the next chunk with the previous chunk's tail (overlap).
+    """
+    # Stage 1: text -> paragraphs.
     paragraphs = [p.strip() for p in text.split("\n") if p.strip()]
 
-    # A single paragraph longer than max_chars can't be packed — hard-split it.
+    # Stage 2: a single paragraph longer than max_chars can't be packed — hard-split it.
     units: list[str] = []
     for paragraph in paragraphs:
         while len(paragraph) > max_chars:
@@ -34,6 +49,7 @@ def chunk_text(
         if paragraph:
             units.append(paragraph)
 
+    # Stage 3: greedy packing with overlap.
     chunks: list[str] = []
     current: list[str] = []
     current_len = 0

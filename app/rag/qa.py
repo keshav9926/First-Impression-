@@ -1,8 +1,14 @@
 # app/rag/qa.py — the "G" in RAG: generate an answer grounded in retrieved chunks.
-# The retrieved chunks are numbered and given to Claude with strict rules:
-# answer ONLY from them, cite every claim, admit when the answer isn't there.
-# This is hard rule #2 (grounded output only) applied at the prompt level;
-# Phase 5 adds automated checks that verify it.
+#
+# CALL FLOW:
+#   main.py: ask() → answer(question, hits)
+#     where `hits` came from store.search() — the top-k relevant chunks.
+#   answer() numbers the chunks, sends them + the question to Claude,
+#   and returns Claude's text back to the endpoint.
+#
+# The system prompt applies hard rule #2 (grounded output only) at the prompt
+# level: answer ONLY from the excerpts, cite every claim, admit when the
+# answer isn't there. Phase 5 adds automated checks that verify compliance.
 
 import anthropic
 
@@ -20,7 +26,19 @@ knowledge and never guess.
 
 
 def answer(question: str, hits: list[dict]) -> str:
-    """Ask Claude the question, constrained to the retrieved chunks."""
+    """Ask Claude the question, constrained to the retrieved chunks.
+
+    Called by: main.py ask(), after retrieval.
+    Calls: the Anthropic API (network call, costs tokens).
+
+    Steps:
+      1. Format the hits as a numbered source list — the numbers are what
+         Claude cites as [1], [2], and they match the `sources` array the
+         endpoint returns, so a reader can check every claim.
+      2. One messages.create() call: system prompt = the rules,
+         user message = sources + question.
+      3. The response arrives as a list of content blocks; join the text ones.
+    """
     sources_block = "\n\n".join(
         f"[{i + 1}] (from {hit['url']})\n{hit['text']}" for i, hit in enumerate(hits)
     )

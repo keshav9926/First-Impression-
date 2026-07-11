@@ -2,6 +2,23 @@
 # Defines the app object that Uvicorn serves and registers all endpoints.
 # Endpoints stay thin: validate → call the right module → shape the response.
 # The real logic lives in app/ingestion/ and app/rag/.
+#
+# CALL FLOW (the whole system, from this file's point of view):
+#
+#   POST /ingest → ingest()
+#       ├── _require_keys(voyage=True)         key present? else 503
+#       ├── robots.is_allowed(seed_url)        rule #1 gate → 403 if refused
+#       ├── fetcher.crawl(url, max_pages)      download + extract pages
+#       ├── chunker.chunk_text(page.text)      pages → chunks (per page)
+#       ├── embeddings.embed_documents(texts)  chunks → vectors (Voyage API)
+#       └── store.replace_all(chunks, vectors) save into Chroma
+#
+#   POST /ask → ask()
+#       ├── _require_keys(voyage=True, claude=True)
+#       ├── store.count()                      empty? → 409 "ingest first"
+#       ├── embeddings.embed_query(question)   question → vector (Voyage API)
+#       ├── store.search(vector, top_k)        nearest chunks from Chroma
+#       └── qa.answer(question, hits)          Claude answers from chunks only
 
 from fastapi import FastAPI, HTTPException
 
@@ -19,7 +36,13 @@ app = FastAPI(
 
 
 def _require_keys(*, voyage: bool = False, claude: bool = False) -> None:
-    """Fail with a clear 503 if a needed API key isn't configured (see config.py)."""
+    """Fail with a clear 503 if a needed API key isn't configured.
+
+    Called by: ingest() and ask(), as their first line.
+    Why: keys default to "" in config.py so /health and tests run without
+    them — so endpoints that DO need a key must check explicitly, and a
+    descriptive 503 beats a confusing auth error from deep inside an SDK.
+    """
     if voyage and not settings.voyage_api_key:
         raise HTTPException(status_code=503, detail="VOYAGE_API_KEY is not set in .env")
     if claude and not settings.anthropic_api_key:
@@ -28,13 +51,26 @@ def _require_keys(*, voyage: bool = False, claude: bool = False) -> None:
 
 @app.get("/health")
 def health() -> dict:
-    """Liveness check: proves the server is up and config loaded correctly."""
+    """Liveness check: proves the server is up and config loaded correctly.
+
+    Called by: humans, tests (tests/test_health.py), and — in production —
+    load balancers / Docker healthchecks deciding whether we get traffic.
+    Calls: nothing — deliberately cheap and dependency-free.
+    """
     return {"status": "ok", "app": settings.app_name, "environment": settings.environment}
 
 
 @app.post("/ingest", response_model=IngestResponse)
 def ingest(request: IngestRequest) -> IngestResponse:
-    """Crawl a public site (robots.txt-compliant), chunk, embed, and store it."""
+    """Crawl a public site (robots.txt-compliant), chunk, embed, and store it.
+
+    Called by: the client (you, via /docs or curl).
+    Calls, in order: _require_keys → robots.is_allowed → fetcher.crawl
+                     → chunker.chunk_text → embeddings.embed_documents
+                     → store.replace_all
+    Request/response shapes: IngestRequest / IngestResponse in schemas.py
+    (FastAPI validated the body against IngestRequest BEFORE this runs).
+    """
     _require_keys(voyage=True)
 
     url = str(request.url)
@@ -68,7 +104,15 @@ def ingest(request: IngestRequest) -> IngestResponse:
 
 @app.post("/ask", response_model=AskResponse)
 def ask(request: AskRequest) -> AskResponse:
-    """Answer a question using only the ingested content, with citations."""
+    """Answer a question using only the ingested content, with citations.
+
+    Called by: the client (you, via /docs or curl).
+    Calls, in order: _require_keys → store.count (guard) →
+                     embeddings.embed_query → store.search → qa.answer
+    Request/response shapes: AskRequest / AskResponse in schemas.py.
+    The `sources` list uses the same [n] numbering Claude cites in the
+    answer text, so every claim can be traced back to a page.
+    """
     _require_keys(voyage=True, claude=True)
 
     if store.count() == 0:

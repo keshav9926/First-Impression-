@@ -4,6 +4,12 @@
 # query that matters for RAG: "give me the k stored vectors nearest to this
 # query vector" (nearest = most similar meaning).
 #
+# CALL FLOW:
+#   main.py: ingest() → replace_all(chunks, vectors)   save everything
+#   main.py: ask()    → count()                        anything ingested?
+#                     → search(query_vector, top_k)    find relevant chunks
+#   All three go through _collection() to open the same on-disk collection.
+#
 # Phase 1 simplification: one collection holding one company's docs;
 # re-ingesting replaces it. Multi-company support can come later.
 
@@ -13,6 +19,12 @@ from app.config import settings
 
 
 def _collection(reset: bool = False) -> chromadb.Collection:
+    """Open (or create) our one Chroma collection from the ./chroma_data folder.
+
+    Called by: replace_all(), search(), count() — every function below.
+    reset=True first deletes the existing collection — used only by
+    replace_all() so each /ingest starts from a clean slate.
+    """
     client = chromadb.PersistentClient(path=settings.chroma_dir)
     if reset:
         try:
@@ -25,6 +37,10 @@ def _collection(reset: bool = False) -> chromadb.Collection:
 def replace_all(chunks: list[dict], embeddings: list[list[float]]) -> int:
     """Wipe the collection and store these chunks. Each chunk: {"text", "url"}.
 
+    Called by: main.py ingest(), as the LAST step of ingestion.
+    Receives: chunks from chunker.py + matching vectors from embeddings.py
+    (same order — chunk i belongs to vector i).
+
     We pass our own Voyage embeddings explicitly — otherwise Chroma would
     silently embed with its built-in default model, and queries embedded by
     Voyage would be compared against vectors from a different model
@@ -34,14 +50,22 @@ def replace_all(chunks: list[dict], embeddings: list[list[float]]) -> int:
     collection.add(
         ids=[f"chunk-{i}" for i in range(len(chunks))],
         documents=[c["text"] for c in chunks],
-        metadatas=[{"url": c["url"]} for c in chunks],
+        metadatas=[{"url": c["url"]} for c in chunks],  # url kept for citations
         embeddings=embeddings,
     )
     return collection.count()
 
 
 def search(query_embedding: list[float], top_k: int) -> list[dict]:
-    """Return the top_k most similar chunks: [{"text", "url", "distance"}]."""
+    """Return the top_k most similar chunks: [{"text", "url", "distance"}].
+
+    Called by: main.py ask(), with the vector from embeddings.embed_query().
+    Output goes to: qa.answer() (the chunks Claude is allowed to use) and
+    into the API response as the citation list.
+
+    "distance": lower = more similar. Chroma compares the query vector
+    against every stored vector and returns the nearest ones.
+    """
     collection = _collection()
     result = collection.query(query_embeddings=[query_embedding], n_results=top_k)
     hits = []
@@ -53,4 +77,9 @@ def search(query_embedding: list[float], top_k: int) -> list[dict]:
 
 
 def count() -> int:
+    """How many chunks are stored right now?
+
+    Called by: main.py ask() — if 0, it returns a 409 ("ingest first")
+    instead of searching an empty store.
+    """
     return _collection().count()
