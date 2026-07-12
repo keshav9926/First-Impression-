@@ -1,53 +1,147 @@
 {
-  "_comment": "Retrieval eval dataset for the currently ingested site (vortexify.ai). 'answerable': question + a substring the URL of a CORRECT chunk must contain (URL-level ground truth). 'unanswerable': questions the site cannot answer — used to measure the false-answer rate (does anything score above min_relevance?) and to pick the threshold from data: it should sit between the unanswerable questions' top scores and the answerable ones'. Re-ingest vortexify.ai before running, or relabel for whatever site is ingested.",
+  "_comment": "Retrieval eval dataset for vortexify.ai (10 pages, 39 chunks as of 2026-07-12). 'answerable': 20 questions, 2 per major page, varied phrasings — rephrased, synonym, different angle. 'expected_url_contains' is a substring the URL of a CORRECT chunk must contain. 'unanswerable': 10 questions the site cannot answer — used to stress-test the false-answer rate and tune min_relevance. Re-ingest vortexify.ai before running, or relabel for whatever site is ingested.",
   "answerable": [
     {
-      "question": "What does this product do?",
-      "expected_url_contains": "vortexify.ai"
-    },
-    {
-      "question": "How does demand forecasting work?",
+      "_page": "demand-forecast — direct ask",
+      "question": "What does the demand forecasting feature do?",
       "expected_url_contains": "demand-forecast"
     },
     {
+      "_page": "demand-forecast — synonym/rephrased",
+      "question": "How does the system predict future customer orders?",
+      "expected_url_contains": "demand-forecast"
+    },
+    {
+      "_page": "demand-forecast — SKU angle (was already in original)",
       "question": "Can it project demand by SKU with accuracy scores?",
       "expected_url_contains": "demand-forecast"
     },
     {
-      "question": "How are materials matched to orders before a shift?",
-      "expected_url_contains": "material-allocation"
-    },
-    {
-      "question": "How does labor scheduling and shift assignment work?",
-      "expected_url_contains": "labor-scheduling"
-    },
-    {
+      "_page": "inventory-risk — direct ask",
       "question": "How do I know if inventory is about to run short?",
       "expected_url_contains": "inventory-risk"
     },
     {
+      "_page": "inventory-risk — rephrased",
+      "question": "Can the platform warn me about upcoming stock-outs before they happen?",
+      "expected_url_contains": "inventory-risk"
+    },
+    {
+      "_page": "load-outlook — direct ask",
       "question": "What does the load outlook feature do?",
       "expected_url_contains": "load-outlook"
     },
     {
+      "_page": "load-outlook — rephrased",
+      "question": "How can I see if my production capacity will be exceeded next month?",
+      "expected_url_contains": "load-outlook"
+    },
+    {
+      "_page": "material-allocation — direct ask",
+      "question": "How are materials matched to orders before a shift?",
+      "expected_url_contains": "material-allocation"
+    },
+    {
+      "_page": "material-allocation — rephrased",
+      "question": "What happens if there are not enough raw materials for all the orders scheduled today?",
+      "expected_url_contains": "material-allocation"
+    },
+    {
+      "_page": "labor-scheduling — direct ask",
+      "question": "How does labor scheduling and shift assignment work?",
+      "expected_url_contains": "labor-scheduling"
+    },
+    {
+      "_page": "labor-scheduling — rephrased",
+      "question": "Can it automatically assign workers to shifts based on availability?",
+      "expected_url_contains": "labor-scheduling"
+    },
+    {
+      "_page": "production-sequencing — direct ask",
+      "question": "How does the system decide the order in which jobs run on the production line?",
+      "expected_url_contains": "production-sequencing"
+    },
+    {
+      "_page": "production-sequencing — rephrased",
+      "question": "What is production sequencing and why does it matter?",
+      "expected_url_contains": "production-sequencing"
+    },
+    {
+      "_page": "pricing — direct ask",
       "question": "How much does it cost and what plans exist?",
       "expected_url_contains": "pricing"
     },
     {
+      "_page": "pricing — rephrased",
+      "question": "Is there a free trial or starter plan available?",
+      "expected_url_contains": "pricing"
+    },
+    {
+      "_page": "security — direct ask",
+      "question": "How does Vortexify handle data security and access control?",
+      "expected_url_contains": "security"
+    },
+    {
+      "_page": "security — rephrased",
+      "question": "Is my company's production data encrypted and kept private?",
+      "expected_url_contains": "security"
+    },
+    {
+      "_page": "homepage — product overview",
+      "question": "What does this product do?",
+      "expected_url_contains": "vortexify.ai"
+    },
+    {
+      "_page": "homepage — integrations",
       "question": "What connectors or integrations are available?",
       "expected_url_contains": "vortexify.ai"
     },
     {
+      "_page": "docs — AI context tab",
       "question": "What is the AI Context tab used for?",
       "expected_url_contains": "docs"
     }
   ],
   "unanswerable": [
-    { "question": "What is the founder's favorite food?" },
-    { "question": "What is the company's office street address?" },
-    { "question": "How many employees does the company have?" },
-    { "question": "What did the CEO study in college?" },
-    { "question": "What is the company's policy on remote work for its own staff?" },
-    { "question": "Which cloud provider hosts their infrastructure?" }
+    {
+      "_note": "personal — absurd, easy to reject",
+      "question": "What is the founder's favorite food?"
+    },
+    {
+      "_note": "personal — absurd, easy to reject",
+      "question": "What did the CEO study in college?"
+    },
+    {
+      "_note": "company ops — not on site",
+      "question": "What is the company's office street address?"
+    },
+    {
+      "_note": "company ops — not on site",
+      "question": "How many employees does the company have?"
+    },
+    {
+      "_note": "company ops — not on site",
+      "question": "What is the company's policy on remote work for its own staff?"
+    },
+    {
+      "_note": "infra — not disclosed on site",
+      "question": "Which cloud provider hosts their infrastructure?"
+    },
+    {
+      "_note": "adjacent domain — competitor product, stress-test",
+      "question": "How does SAP IBP handle demand planning differently from other tools?"
+    },
+    {
+      "_note": "adjacent domain — general ERP question, stress-test",
+      "question": "What is the difference between MRP and MRP II in manufacturing?"
+    },
+    {
+      "_note": "adjacent domain — supply chain theory, stress-test",
+      "question": "How does the bullwhip effect impact upstream supplier ordering?"
+    },
+    {
+      "_note": "adjacent domain — competitor, stress-test",
+      "question": "Does Kinaxis RapidResponse support real-time supply chain simulation?"
+    }
   ]
 }

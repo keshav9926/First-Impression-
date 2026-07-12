@@ -160,8 +160,13 @@ def crawl(start_url: str, max_pages: int) -> CrawlResult:
                 continue
 
             # HTML → readable text (nav/footer/cookie-banner stripped).
+            # favor_precision: stricter boilerplate removal — added after a
+            # nav-debris chunk ("View all →20+ connectors...") scored 0.490
+            # relevance (above threshold) in the 2026-07-12 eval debugging.
+            # Trade-off: precision mode may drop some borderline-legit text;
+            # we accept that — clean chunks matter more than complete ones.
             html = response.text
-            text = trafilatura.extract(html) or ""
+            text = trafilatura.extract(html, favor_precision=True) or ""
             if text.strip():
                 pages.append(Page(url=url, text=text))
 

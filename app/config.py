@@ -52,8 +52,10 @@ class Settings(BaseSettings):
     # Candidates scoring below this after re-ranking are treated as
     # irrelevant; if NONE clear the bar, /ask answers "no relevant content"
     # without calling the LLM. Tune with evals/run_retrieval_eval.py.
-    # 0.45 chosen from the 2026-07-12 eval run on vortexify.ai: lowest
-    # answerable top-score 0.480, highest unanswerable 0.424 → midpoint.
+    # 0.45 chosen from the 2026-07-12 eval run on vortexify.ai:
+    # lowest answerable top-score 0.480, highest unanswerable 0.424 → midpoint.
+    # NOTE: rerank-2.5-lite is 3rd gen. rerank-2.5 (full) is the real upgrade
+    # when scores need to be sharper — NOT rerank-2 (that is 2nd gen, older).
     min_relevance: float = 0.45
 
     # --- Vector store (Chroma) — used by store.py ---
