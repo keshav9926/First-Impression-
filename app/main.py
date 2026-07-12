@@ -16,25 +16,36 @@
 #   POST /ask → ask()   [Phase 2: hybrid retrieval funnel]
 #       ├── _require_keys(voyage=True, llm=True)
 #       ├── store.count()                      empty? → 409 "ingest first"
-#       ├── embeddings.embed_query(question)   question → vector (Voyage API)
-#       ├── store.search(vector, 20)           vector arm: MEANING matches
-#       ├── keyword.search(question, 20)       BM25 arm: EXACT-WORD matches
-#       ├── fusion.rrf(both, limit=10)         merge rankings (no score mixing)
-#       ├── rerank.rerank(question, cands)     cross-encoder scores 0..1 (Voyage)
+#       ├── pipeline.retrieve(question)        embed → vector+BM25 → RRF → rerank
 #       ├── min_relevance gate                 all below bar? → refuse, skip LLM
 #       └── qa.answer(question, relevant)      LLM answers from chunks only
+#
+#   POST /report → report()   [Phase 3: the ReAct analysis agent]
+#       ├── _require_keys(voyage=True, llm=True) + provider==gemini guard
+#       ├── store.count()                      empty? → 409 "ingest first"
+#       └── generate_report()                  agent explores (list_pages /
+#                                              read_page / search_content) then
+#                                              synthesizes the cited report
 
 import logging
 
 import voyageai.error
 from fastapi import FastAPI, HTTPException
 
+from app.agent.report import generate_report
 from app.config import settings
 from app.ingestion.chunker import chunk_text
 from app.ingestion.fetcher import crawl
 from app.ingestion.robots import is_allowed
-from app.rag import embeddings, fusion, keyword, qa, rerank, store
-from app.schemas import AskRequest, AskResponse, IngestRequest, IngestResponse, Source
+from app.rag import embeddings, pipeline, qa, store
+from app.schemas import (
+    AskRequest,
+    AskResponse,
+    IngestRequest,
+    IngestResponse,
+    ReportResponse,
+    Source,
+)
 
 logger = logging.getLogger("first_impression")
 
@@ -124,10 +135,6 @@ def ingest(request: IngestRequest) -> IngestResponse:
     )
 
 
-# Hybrid retrieval funnel widths: cast wide, then narrow.
-CANDIDATES_PER_RETRIEVER = 20  # each retriever's contribution to fusion
-CANDIDATES_TO_RERANK = 10  # fused list size sent to the (slower) re-ranker
-
 NO_CONTENT_ANSWER = (
     "The ingested content does not appear to contain information relevant "
     "to this question, so no grounded answer can be given."
@@ -157,20 +164,9 @@ def ask(request: AskRequest) -> AskResponse:
         raise HTTPException(status_code=409, detail="Nothing ingested yet — call /ingest first.")
 
     try:
-        # Recall stage: two retrievers with complementary blind spots.
-        query_vector = embeddings.embed_query(request.question)
-        vector_hits = store.search(query_vector, top_k=CANDIDATES_PER_RETRIEVER)
-        keyword_hits = keyword.search(request.question, top_k=CANDIDATES_PER_RETRIEVER)
-
-        # Merge stage: rank-based fusion (no score mixing). Each arm's top-3
-        # are guaranteed through to the reranker — consensus nominates, but
-        # only the cross-encoder judges (see fusion.py for the eval finding).
-        candidates = fusion.rrf(
-            vector_hits, keyword_hits, limit=CANDIDATES_TO_RERANK, guaranteed_per_list=3
-        )
-
-        # Precision stage: cross-encoder scores each candidate 0..1.
-        ranked = rerank.rerank(request.question, candidates, top_k=request.top_k)
+        # The full hybrid funnel (embed → vector + BM25 → RRF → rerank) now
+        # lives in rag/pipeline.py so the agent's search_content tool shares it.
+        ranked = pipeline.retrieve(request.question, top_k=request.top_k)
     except voyageai.error.RateLimitError:
         raise HTTPException(
             status_code=429,
@@ -211,3 +207,48 @@ def ask(request: AskRequest) -> AskResponse:
         for i, hit in enumerate(relevant)
     ]
     return AskResponse(answer=answer_text, sources=sources)
+
+
+@app.post("/report", response_model=ReportResponse)
+def report() -> ReportResponse:
+    """Produce the structured First Impression report from ingested content.
+
+    Called by: the client (you). Takes no body — it analyzes whatever site is
+    currently ingested.
+    Calls: generate_report() (agent/report.py), which runs the ReAct agent
+    (explore with tools) then a schema-constrained synthesis call.
+
+    Runtime: ~2-4 minutes under free-tier pacing (many Gemini calls + a few
+    Voyage calls from the search_content tool); the request blocks meanwhile.
+    Async/background jobs are a known future improvement, not this phase.
+    """
+    _require_keys(voyage=True, llm=True)
+
+    # The agent is built on Gemini function calling; guard the provider so a
+    # misconfigured .env fails with a clear message, not a deep SDK error.
+    if settings.llm_provider != "gemini":
+        raise HTTPException(
+            status_code=501,
+            detail="The report agent currently requires LLM_PROVIDER=gemini.",
+        )
+
+    if store.count() == 0:
+        raise HTTPException(status_code=409, detail="Nothing ingested yet — call /ingest first.")
+
+    try:
+        report_obj, steps_log, pages_examined = generate_report()
+    except voyageai.error.RateLimitError:
+        # The agent's search_content tool calls Voyage; free-tier limit → 429.
+        raise HTTPException(
+            status_code=429,
+            detail="Voyage free-tier rate limit hit during analysis — wait a "
+            "minute and retry.",
+        )
+
+    tool_calls = [f"{s['tool']}({s['args']})" for s in steps_log]
+    return ReportResponse(
+        report=report_obj,
+        steps_taken=len(steps_log),
+        pages_examined=pages_examined,
+        tool_calls=tool_calls,
+    )

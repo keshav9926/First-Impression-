@@ -89,12 +89,17 @@ def all_chunks() -> list[dict]:
     """
     collection = _collection()
     result = collection.get()  # no filter = everything
-    return [
+    chunks = [
         {"id": chunk_id, "text": text, "url": meta["url"]}
         for chunk_id, text, meta in zip(
             result["ids"], result["documents"], result["metadatas"]
         )
     ]
+    # Chroma .get() does not guarantee order; sort by the numeric chunk index
+    # ("chunk-0", "chunk-1", ...) so a page's chunks come back in reading order
+    # (the agent's read_page tool concatenates them and needs them in sequence).
+    chunks.sort(key=lambda c: int(c["id"].split("-")[1]))
+    return chunks
 
 
 def count() -> int:

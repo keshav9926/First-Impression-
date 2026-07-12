@@ -41,7 +41,15 @@ class Settings(BaseSettings):
     # --- LLM (Google Gemini) — used by qa.py when llm_provider="gemini" ---
     # Free-tier key from https://aistudio.google.com (no card required).
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-2.5-flash"  # single-call workloads (/ask)
+    # The Phase 3 agent makes MANY calls per report. Ideally it runs on a
+    # separate model to get its own quota bucket — but on THIS project's free
+    # tier, gemini-2.0-flash-lite has a quota of 0 (unusable) and 2.5-flash-lite
+    # 404s for new users, so gemini-2.5-flash is the only free-usable model.
+    # Its free quota is ~20 requests/DAY, and one report spends ~8-13 — so a
+    # free-tier account gets roughly one or two reports per day. With paid
+    # quota, point this at a lighter model (e.g. a flash-lite) for cost/speed.
+    gemini_agent_model: str = "gemini-2.5-flash"
 
     # --- Embeddings (Voyage AI) — used by embeddings.py ---
     voyage_api_key: str = ""
