@@ -42,14 +42,25 @@ class Settings(BaseSettings):
     # Free-tier key from https://aistudio.google.com (no card required).
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"  # single-call workloads (/ask)
-    # The Phase 3 agent makes MANY calls per report. Ideally it runs on a
-    # separate model to get its own quota bucket — but on THIS project's free
-    # tier, gemini-2.0-flash-lite has a quota of 0 (unusable) and 2.5-flash-lite
-    # 404s for new users, so gemini-2.5-flash is the only free-usable model.
-    # Its free quota is ~20 requests/DAY, and one report spends ~8-13 — so a
-    # free-tier account gets roughly one or two reports per day. With paid
-    # quota, point this at a lighter model (e.g. a flash-lite) for cost/speed.
+    # The Phase 3 agent makes MANY calls per report. On THIS project's Gemini
+    # free tier that's a problem (~20 requests/DAY on 2.5-flash; the flash-lite
+    # models are unusable here), so the agent can run on Groq instead — see
+    # agent_provider below. This is the model used when agent_provider="gemini".
     gemini_agent_model: str = "gemini-2.5-flash"
+
+    # --- LLM (Groq) — used by the report agent when agent_provider="groq" ---
+    # Free-tier key from https://console.groq.com (no card). Groq's free limits
+    # are generous (tens of requests/minute), which suits the agent's burst of
+    # calls far better than Gemini's tiny daily free quota.
+    groq_api_key: str = ""
+    groq_model: str = "llama-3.3-70b-versatile"  # tool-calling capable
+
+    # --- Which LLM runs the /report agent: "gemini" or "groq" ---
+    # Separate from llm_provider (which drives /ask) because the agent is a
+    # high-volume workload with different rate-limit economics. The tool-calling
+    # dialects differ per provider, so each has its own driver (agent/*_driver
+    # style) behind this switch.
+    agent_provider: str = "gemini"
 
     # --- Embeddings (Voyage AI) — used by embeddings.py ---
     voyage_api_key: str = ""

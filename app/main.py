@@ -21,14 +21,16 @@
 #       └── qa.answer(question, relevant)      LLM answers from chunks only
 #
 #   POST /report → report()   [Phase 3: the ReAct analysis agent]
-#       ├── _require_keys(voyage=True, llm=True) + provider==gemini guard
+#       ├── key guards (Voyage + the configured agent_provider's key)
 #       ├── store.count()                      empty? → 409 "ingest first"
 #       └── generate_report()                  agent explores (list_pages /
 #                                              read_page / search_content) then
 #                                              synthesizes the cited report
+#                                              (provider: gemini or groq)
 
 import logging
 
+import groq
 import voyageai.error
 from fastapi import FastAPI, HTTPException
 
@@ -222,14 +224,17 @@ def report() -> ReportResponse:
     Voyage calls from the search_content tool); the request blocks meanwhile.
     Async/background jobs are a known future improvement, not this phase.
     """
-    _require_keys(voyage=True, llm=True)
-
-    # The agent is built on Gemini function calling; guard the provider so a
-    # misconfigured .env fails with a clear message, not a deep SDK error.
-    if settings.llm_provider != "gemini":
+    # The report agent needs Voyage (its search_content tool) plus the key for
+    # whichever agent provider is configured.
+    _require_keys(voyage=True)
+    if settings.agent_provider == "gemini" and not settings.gemini_api_key:
+        raise HTTPException(status_code=503, detail="GEMINI_API_KEY is not set in .env")
+    if settings.agent_provider == "groq" and not settings.groq_api_key:
+        raise HTTPException(status_code=503, detail="GROQ_API_KEY is not set in .env")
+    if settings.agent_provider not in ("gemini", "groq"):
         raise HTTPException(
             status_code=501,
-            detail="The report agent currently requires LLM_PROVIDER=gemini.",
+            detail="AGENT_PROVIDER must be 'gemini' or 'groq'.",
         )
 
     if store.count() == 0:
@@ -243,6 +248,12 @@ def report() -> ReportResponse:
             status_code=429,
             detail="Voyage free-tier rate limit hit during analysis — wait a "
             "minute and retry.",
+        )
+    except groq.RateLimitError:
+        # Groq agent provider exhausted its rate limit despite in-driver retry.
+        raise HTTPException(
+            status_code=429,
+            detail="Groq rate limit hit during analysis — wait a minute and retry.",
         )
 
     tool_calls = [f"{s['tool']}({s['args']})" for s in steps_log]

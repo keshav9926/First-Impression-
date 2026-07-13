@@ -24,6 +24,15 @@ from google.genai import types
 from app.config import settings
 from app.rag import pipeline, store
 
+# Tool outputs are BOUNDED so the ReAct history can't grow past a provider's
+# per-request context/token budget (Groq free tier is only ~12K tokens/minute,
+# and the whole conversation is resent every step). Bounded reads also make the
+# agent cheaper and faster on every provider. If a page is truncated, the agent
+# is told to use search_content to dig into specifics instead.
+READ_PAGE_MAX_CHARS = 4000
+SEARCH_TOP_K = 3
+SEARCH_SNIPPET_CHARS = 1200
+
 
 def _list_pages() -> str:
     """Observation for list_pages(): the distinct pages available to analyze."""
@@ -48,7 +57,13 @@ def _read_page(url: str) -> str:
             + "\n".join(f"- {u}" for u in available)
         )
     body = "\n\n".join(c["text"] for c in page_chunks)
-    return f"Full text of {url}:\n\n{body}"
+    if len(body) > READ_PAGE_MAX_CHARS:
+        body = (
+            body[:READ_PAGE_MAX_CHARS]
+            + "\n\n[... page truncated — use search_content to find specific "
+            "details on this page ...]"
+        )
+    return f"Text of {url}:\n\n{body}"
 
 
 def _search_content(query: str) -> str:
@@ -58,12 +73,13 @@ def _search_content(query: str) -> str:
     relevance gate — so if nothing clears the bar, the agent is told plainly
     that the site does not cover this, which is itself a useful finding
     (it becomes an 'unanswered question' in the report)."""
-    hits = pipeline.retrieve(query, top_k=5)
+    hits = pipeline.retrieve(query, top_k=SEARCH_TOP_K)
     relevant = [h for h in hits if h["relevance"] >= settings.min_relevance]
     if not relevant:
         return f"No content relevant to {query!r} was found in the ingested pages."
     return "\n\n".join(
-        f"[relevance {h['relevance']:.2f}] (from {h['url']})\n{h['text']}" for h in relevant
+        f"[relevance {h['relevance']:.2f}] (from {h['url']})\n{h['text'][:SEARCH_SNIPPET_CHARS]}"
+        for h in relevant
     )
 
 
@@ -85,52 +101,79 @@ def execute_tool(name: str, args: dict) -> str:
     return f"Unknown tool {name!r}. Available: list_pages, read_page, search_content."
 
 
-# --- Schemas handed to Gemini so it knows the tool surface ---
-
-FUNCTION_DECLARATIONS = [
-    types.FunctionDeclaration(
-        name="list_pages",
-        description=(
+# --- Neutral tool metadata (name, description, JSON-schema params) ---
+# Both provider schemas below are built from these, so the tool surface is
+# defined ONCE and can't drift between Gemini and Groq.
+_TOOLS = [
+    {
+        "name": "list_pages",
+        "description": (
             "List every public page available to analyze. Call this FIRST to "
             "see what the site contains before deciding what to read."
         ),
-        parameters=types.Schema(type=types.Type.OBJECT, properties={}),
-    ),
-    types.FunctionDeclaration(
-        name="read_page",
-        description=(
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "read_page",
+        "description": (
             "Read the full text of one page, exactly as a prospective user "
             "would. Use the URLs returned by list_pages."
         ),
-        parameters=types.Schema(
-            type=types.Type.OBJECT,
-            properties={
-                "url": types.Schema(
-                    type=types.Type.STRING,
-                    description="The exact page URL to read (from list_pages).",
-                )
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "The exact page URL to read."}
             },
-            required=["url"],
-        ),
-    ),
-    types.FunctionDeclaration(
-        name="search_content",
-        description=(
+            "required": ["url"],
+        },
+    },
+    {
+        "name": "search_content",
+        "description": (
             "Search across ALL pages for content on a specific topic (e.g. "
             "'onboarding steps', 'pricing', 'customer support', 'security'). "
             "Use this to check whether the site covers something a new user "
             "would look for. If it returns nothing, the site likely does not "
             "address that topic — a useful finding in itself."
         ),
-        parameters=types.Schema(
-            type=types.Type.OBJECT,
-            properties={
-                "query": types.Schema(
-                    type=types.Type.STRING,
-                    description="What to look for, in plain language.",
-                )
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "What to look for, in plain language."}
             },
-            required=["query"],
-        ),
-    ),
+            "required": ["query"],
+        },
+    },
+]
+
+
+# --- Groq / OpenAI-compatible tool schema (built from _TOOLS) ---
+OPENAI_TOOLS = [
+    {"type": "function", "function": t} for t in _TOOLS
+]
+
+
+# --- Gemini function-declaration schema (built from _TOOLS) ---
+
+_GEMINI_TYPE = {"string": types.Type.STRING}
+
+
+def _gemini_schema(params: dict) -> types.Schema:
+    """Convert a JSON-schema params dict into a Gemini types.Schema."""
+    properties = {
+        name: types.Schema(type=_GEMINI_TYPE[spec["type"]], description=spec.get("description"))
+        for name, spec in params.get("properties", {}).items()
+    }
+    return types.Schema(
+        type=types.Type.OBJECT,
+        properties=properties,
+        required=params.get("required", []),
+    )
+
+
+FUNCTION_DECLARATIONS = [
+    types.FunctionDeclaration(
+        name=t["name"], description=t["description"], parameters=_gemini_schema(t["parameters"])
+    )
+    for t in _TOOLS
 ]
