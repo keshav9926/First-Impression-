@@ -5,11 +5,12 @@
 #     where `hits` came from store.search() — the top-k relevant chunks.
 #   answer() numbers the chunks, builds the prompt, then dispatches to ONE
 #   provider based on settings.llm_provider:
-#       "gemini"    → _ask_gemini()    (free tier — current default)
-#       "anthropic" → _ask_claude()    (paid — switch back via .env when funded)
+#       "groq"      → _ask_groq()      (free tier, high rate-limits — default for /ask)
+#       "gemini"    → _ask_gemini()    (free tier — daily quota burns fast)
+#       "anthropic" → _ask_claude()    (paid — switch via .env when funded)
 #
-# This file is the ONLY place that talks to an LLM. That isolation is why
-# swapping providers was a small, local change — the crawler, chunker,
+# This file is the ONLY place that talks to an LLM for Q&A. That isolation is
+# why swapping providers was a small, local change — the crawler, chunker,
 # embeddings, and store never knew it happened.
 #
 # The system prompt applies hard rule #2 (grounded output only) at the prompt
@@ -17,6 +18,7 @@
 # answer isn't there. Phase 5 adds automated checks that verify compliance.
 
 import anthropic
+import groq as groq_sdk
 from google import genai
 from google.genai import types as genai_types
 
@@ -78,14 +80,38 @@ def _ask_claude(user_message: str) -> str:
     return "".join(block.text for block in response.content if block.type == "text")
 
 
+def _ask_groq(user_message: str) -> str:
+    """Send the prompt to Groq (Llama) and return its text answer.
+
+    Called by: answer() when settings.llm_provider == "groq".
+    Uses the same groq_model configured for the report agent; generous
+    free-tier rate limits (tens of RPM vs Gemini's ~20 req/day) make
+    this the better choice for interactive /ask calls.
+    """
+    client = groq_sdk.Groq(api_key=settings.groq_api_key)
+    response = client.chat.completions.create(
+        model=settings.groq_model,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_message},
+        ],
+    )
+    return response.choices[0].message.content or ""
+
+
 def answer(question: str, hits: list[dict]) -> str:
     """Ask the configured LLM the question, constrained to the retrieved chunks.
 
     Called by: main.py ask(), after retrieval.
-    Calls: _build_user_message(), then _ask_gemini() or _ask_claude()
-    depending on settings.llm_provider.
+    Calls: _build_user_message(), then whichever of _ask_groq / _ask_gemini /
+    _ask_claude is selected by settings.llm_provider.
+    Default (llm_provider="groq"): Groq API — high rate-limits, great for
+    interactive calls. Switch to "gemini" or "anthropic" via .env.
     """
     user_message = _build_user_message(question, hits)
     if settings.llm_provider == "anthropic":
         return _ask_claude(user_message)
-    return _ask_gemini(user_message)
+    if settings.llm_provider == "gemini":
+        return _ask_gemini(user_message)
+    # Default: groq
+    return _ask_groq(user_message)

@@ -64,11 +64,16 @@ def _require_keys(*, voyage: bool = False, llm: bool = False) -> None:
     Why: keys default to "" in config.py so /health and tests run without
     them — so endpoints that DO need a key must check explicitly, and a
     descriptive 503 beats a confusing auth error from deep inside an SDK.
-    The llm check looks at whichever provider is active (config.llm_provider).
+    The llm check looks at whichever provider is active (config.llm_provider):
+      "groq"      → GROQ_API_KEY   (default for /ask)
+      "gemini"    → GEMINI_API_KEY
+      "anthropic" → ANTHROPIC_API_KEY
     """
     if voyage and not settings.voyage_api_key:
         raise HTTPException(status_code=503, detail="VOYAGE_API_KEY is not set in .env")
     if llm:
+        if settings.llm_provider == "groq" and not settings.groq_api_key:
+            raise HTTPException(status_code=503, detail="GROQ_API_KEY is not set in .env")
         if settings.llm_provider == "anthropic" and not settings.anthropic_api_key:
             raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not set in .env")
         if settings.llm_provider == "gemini" and not settings.gemini_api_key:

@@ -6,7 +6,7 @@
 # character and the "swap providers" story would be a lie. Same prompts, same
 # behavior, different backend.
 
-MAX_STEPS = 12  # generous for a startup site (survey + read a handful + a few searches)
+MAX_STEPS = 5  # capped: list_pages + read key pages + 1-2 targeted searches is sufficient
 
 EXPLORE_SYSTEM = """\
 You are a product analyst. You examine a company's PUBLIC website exactly as a \

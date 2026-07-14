@@ -1,9 +1,11 @@
 # app/agent/groq_driver.py — the report agent, driven by Groq (Llama).
 #
-# Same TWO phases as the Gemini driver, same prompts (agent/prompts.py), same
-# tools (agent/tools.execute_tool) — only the API dialect differs:
-#   Phase A — EXPLORE: Groq's OpenAI-compatible tool-calling loop.
-#   Phase B — SYNTHESIZE: JSON mode + Pydantic validation into the report.
+# TWO distinct phases with DIFFERENT providers:
+#   Phase A — EXPLORE  : Groq's OpenAI-compatible tool-calling loop.
+#                         Groq's generous free-tier RPM handles the burst well.
+#   Phase B — SYNTHESIZE (final eval): Gemini — native response_schema gives us
+#                         type-safe structured output; Gemini is also the model
+#                         the user wants for the final "judgment" call.
 #
 # Groq is on the OpenAI-compatible chat.completions API, so the message shapes
 # differ from Gemini's (role "assistant" with tool_calls; role "tool" results),
@@ -19,6 +21,8 @@ import re
 import time
 
 import groq
+from google import genai
+from google.genai import types as genai_types
 
 from app.agent import prompts, tools
 from app.config import settings
@@ -26,22 +30,9 @@ from app.schemas import FirstImpressionReport
 
 _MAX_RATE_RETRIES = 6
 # Groq free tier is ~12K tokens/minute, and the whole history is resent each
-# step, so keep the exploration shorter than the Gemini cap to bound growth.
-_GROQ_MAX_STEPS = 8
-
-# A compact, human-readable shape for synthesis. We send THIS instead of the
-# full FirstImpressionReport JSON schema (which is ~1K tokens) to save context;
-# Pydantic still validates the result, so correctness doesn't depend on it.
-_SHAPE_HINT = """\
-{
-  "company": "string",
-  "what_the_product_is":       [{"claim": "string", "evidence": "string", "source_url": "string"}],
-  "likely_new_user_journey":   [{"claim": "string", "evidence": "string", "source_url": "string"}],
-  "friction_points":           [{"claim": "string", "evidence": "string", "source_url": "string"}],
-  "standout_strengths":        [{"claim": "string", "evidence": "string", "source_url": "string"}],
-  "unanswered_questions":      ["string"],
-  "scope_note": "string"
-}"""
+# step. Cap at 5 to match the Gemini driver's MAX_STEPS (list_pages + read
+# key pages + 1-2 targeted searches is sufficient for most startup sites).
+_GROQ_MAX_STEPS = 5
 
 
 def _retry_after_seconds(exc: groq.RateLimitError) -> float:
@@ -68,10 +59,17 @@ def _complete(client: groq.Groq, **kwargs):
 
 
 def generate() -> tuple[FirstImpressionReport, list[dict], list[str]]:
-    """Run explore → synthesize on Groq. Returns (report, steps_log, pages)."""
-    client = groq.Groq(api_key=settings.groq_api_key)
+    """Run explore (Groq) → synthesize (Gemini). Returns (report, steps_log, pages).
 
-    # ---- Phase A: explore (tool-calling loop) ----
+    Phase A: Groq drives the ReAct tool-calling loop — its generous free-tier
+    RPM handles the burst of calls without exhausting a daily quota.
+    Phase B: Gemini produces the final structured report via response_schema —
+    native type-safe schema enforcement, and the "final eval" model the user
+    configured for quality-critical output.
+    """
+    groq_client = groq.Groq(api_key=settings.groq_api_key)
+
+    # ---- Phase A: explore (Groq tool-calling loop) ----
     messages: list = [
         {"role": "system", "content": prompts.EXPLORE_SYSTEM},
         {"role": "user", "content": "Analyze this company's public site and prepare its report."},
@@ -80,7 +78,7 @@ def generate() -> tuple[FirstImpressionReport, list[dict], list[str]]:
 
     for _ in range(_GROQ_MAX_STEPS):
         response = _complete(
-            client, messages=messages, tools=tools.OPENAI_TOOLS, tool_choice="auto"
+            groq_client, messages=messages, tools=tools.OPENAI_TOOLS, tool_choice="auto"
         )
         message = response.choices[0].message
 
@@ -112,35 +110,46 @@ def generate() -> tuple[FirstImpressionReport, list[dict], list[str]]:
             steps_log.append({"tool": tc.function.name, "args": args})
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": observation})
 
-    # ---- Phase B: synthesize into the schema (JSON mode + Pydantic) ----
-    # Groq's JSON mode guarantees valid JSON but not schema-conformance, so we
-    # hand it the shape and VALIDATE with Pydantic (retrying once on a bad
-    # shape). "json" must appear in the prompt for Groq's JSON mode.
-    messages.append(
-        {
-            "role": "user",
-            "content": (
-                f"{prompts.SYNTHESIZE_INSTRUCTION}\n\n"
-                f"Return ONLY a JSON object with exactly this shape:\n{_SHAPE_HINT}"
-            ),
-        }
-    )
-
-    report: FirstImpressionReport | None = None
-    for attempt in range(2):
-        response = _complete(client, messages=messages, response_format={"type": "json_object"})
-        raw = response.choices[0].message.content or "{}"
-        try:
-            report = FirstImpressionReport.model_validate_json(raw)
-            break
-        except ValueError as exc:
-            if attempt == 1:
-                raise
-            # Tell the model exactly what was wrong and let it fix the shape.
-            messages.append({"role": "assistant", "content": raw})
-            messages.append(
-                {"role": "user", "content": f"That did not match the schema: {exc}. Fix it."}
+    # ---- Phase B: synthesize into the schema (Gemini — final eval) ----
+    # Groq explored; Gemini produces the definitive structured report.
+    # We distill the Groq conversation into a flat context block that Gemini's
+    # stateless API can consume, then use response_schema for native enforcement
+    # (no JSON mode tricks, no Pydantic retry loop needed).
+    context_parts: list[str] = []
+    for msg in messages:
+        role = msg["role"]
+        if role == "system":
+            continue  # already in EXPLORE_SYSTEM prompt below
+        content = msg.get("content") or ""
+        if role == "assistant" and msg.get("tool_calls"):
+            calls = ", ".join(
+                f"{tc['function']['name']}({tc['function']['arguments']})"
+                for tc in msg["tool_calls"]
             )
+            context_parts.append(f"[agent called tools: {calls}]")
+        elif role == "tool":
+            context_parts.append(f"[tool result]: {content}")
+        elif content:
+            context_parts.append(f"[{role}]: {content}")
+
+    gemini_client = genai.Client(api_key=settings.gemini_api_key)
+    synthesis_prompt = (
+        "Below is the raw exploration log from a ReAct agent that examined the "
+        "company's public website using Groq.\n\n"
+        + "\n".join(context_parts)
+        + "\n\n"
+        + prompts.SYNTHESIZE_INSTRUCTION
+    )
+    synthesis_response = gemini_client.models.generate_content(
+        model=settings.gemini_agent_model,
+        contents=synthesis_prompt,
+        config=genai_types.GenerateContentConfig(
+            system_instruction=prompts.EXPLORE_SYSTEM,
+            response_mime_type="application/json",
+            response_schema=FirstImpressionReport,
+        ),
+    )
+    report: FirstImpressionReport = synthesis_response.parsed
 
     pages_examined = sorted(
         {s["args"]["url"] for s in steps_log if s["tool"] == "read_page" and "url" in s["args"]}

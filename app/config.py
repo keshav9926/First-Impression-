@@ -26,10 +26,13 @@ class Settings(BaseSettings):
     app_name: str = "First Impression"
     environment: str = "development"  # "development" | "production"
 
-    # --- LLM provider switch — used by qa.py ---
-    # "gemini" (free tier) or "anthropic" (paid). The rest of the pipeline
-    # doesn't know or care which LLM answers — only qa.py reads this.
-    llm_provider: str = "gemini"
+    # --- LLM provider switch — used by rag/qa.py for /ask ---
+    # "groq"      : Llama via Groq API (generous free-tier RPM — default for /ask)
+    # "gemini"    : Google Gemini (free tier, but ~20 req/day — use sparingly)
+    # "anthropic" : Claude (paid)
+    # The /report agent ALWAYS uses Groq for exploration (Phase A) and Gemini
+    # for the final synthesis (Phase B), regardless of this setting.
+    llm_provider: str = "groq"
 
     # --- LLM (Anthropic) — used by qa.py when llm_provider="anthropic" ---
     # Default "" instead of required: lets /health and tests run without keys.
