@@ -42,15 +42,20 @@ SKIP_EXTENSIONS = (
 
 @dataclass
 class Page:
-    """One successfully fetched page: its URL + the readable text we extracted.
+    """One successfully fetched page: its URL + the readable text we extracted
+    + its section headings (h1-h3), in document order.
 
     Produced by: crawl().
     Consumed by: main.py ingest(), which sends .text to chunker.chunk_text()
-    and keeps .url so every chunk can cite the page it came from.
+    and keeps .url so every chunk can cite the page it came from. .headings
+    becomes chunk metadata → the agent's read_page shows it as a section map,
+    so a truncated long page still reveals WHAT EXISTS deeper (the agent can
+    then search_content into any section it never saw).
     """
 
     url: str
     text: str
+    headings: list[str]
 
 
 @dataclass
@@ -81,6 +86,66 @@ class _LinkCollector(HTMLParser):
             for name, value in attrs:
                 if name == "href" and value:
                     self.hrefs.append(value)
+
+
+class _HeadingCollector(HTMLParser):
+    """Pulls the text of every <h1>/<h2>/<h3> out of a page — the page's own
+    table of contents. Same HTMLParser pattern as _LinkCollector above.
+
+    Called by: _extract_headings(). Trafilatura's plain-text extraction
+    FLATTENS headings into ordinary lines (structure lost), so we parse them
+    from the raw HTML separately — additive, the text pipeline is untouched.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.headings: list[str] = []
+        self._inside: str | None = None  # the heading tag we're currently in
+        self._buffer: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in ("h1", "h2", "h3"):
+            self._inside = tag
+            self._buffer = []
+
+    def handle_endtag(self, tag: str) -> None:
+        if self._inside == tag:
+            text = " ".join("".join(self._buffer).split())  # collapse whitespace
+            if text:
+                self.headings.append(text)
+            self._inside = None
+
+    def handle_data(self, data: str) -> None:
+        if self._inside:
+            self._buffer.append(data)
+
+
+# Bounds so a pathological page can't bloat the metadata: plenty for a real
+# docs ToC, tiny in tokens either way.
+_MAX_HEADINGS = 40
+_MAX_HEADING_CHARS = 80
+
+
+def _extract_headings(html: str) -> list[str]:
+    """The page's section headings (h1-h3), deduped, in document order.
+
+    Called by: crawl(), once per fetched page. Output rides on Page.headings.
+    """
+    collector = _HeadingCollector()
+    try:
+        collector.feed(html)
+    except Exception:
+        return []  # malformed HTML — a missing map, not a failed page
+    seen: set[str] = set()
+    headings = []
+    for h in collector.headings:
+        h = h[:_MAX_HEADING_CHARS]
+        if h.lower() not in seen:
+            seen.add(h.lower())
+            headings.append(h)
+        if len(headings) >= _MAX_HEADINGS:
+            break
+    return headings
 
 
 def _extract_links(html: str, base_url: str, domain: str) -> list[str]:
@@ -168,7 +233,7 @@ def crawl(start_url: str, max_pages: int) -> CrawlResult:
             html = response.text
             text = trafilatura.extract(html, favor_precision=True) or ""
             if text.strip():
-                pages.append(Page(url=url, text=text))
+                pages.append(Page(url=url, text=text, headings=_extract_headings(html)))
 
             # Feed new same-domain links into the queue for later iterations.
             for link in _extract_links(html, base_url=url, domain=domain):

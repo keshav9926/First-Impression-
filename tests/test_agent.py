@@ -53,6 +53,47 @@ def test_read_page_unknown_url_lists_whats_available(monkeypatch):
     assert "https://acme.com/pricing" in out  # helps the model recover
 
 
+def test_read_page_truncation_shows_section_map(monkeypatch):
+    # A long page gets cut at READ_PAGE_MAX_CHARS — the section map must reveal
+    # what exists beyond the cut so the model can search into it.
+    long_chunks = [
+        {
+            "id": "chunk-0",
+            "text": "word " * 2000,  # ~10K chars → forces truncation
+            "url": "https://acme.com/docs",
+            "headings": "Setup · Deployment · Access & roles",
+        }
+    ]
+    monkeypatch.setattr(tools.store, "all_chunks", lambda: long_chunks)
+    out = tools.execute_tool("read_page", {"url": "https://acme.com/docs"})
+    assert "Sections on this page: Setup · Deployment · Access & roles" in out
+    assert "page truncated" in out
+
+
+def test_read_page_short_page_skips_the_map(monkeypatch):
+    # Fully-visible page → no truncation → no map (no wasted tokens).
+    monkeypatch.setattr(tools.store, "all_chunks", lambda: FAKE_CHUNKS)
+    out = tools.execute_tool("read_page", {"url": "https://acme.com/"})
+    assert "Sections on this page" not in out
+
+
+def test_extract_headings_pulls_h1_to_h3_in_order():
+    from app.ingestion.fetcher import _extract_headings
+
+    html = """
+    <html><body>
+      <h1>Docs</h1>
+      <p>intro text</p>
+      <h2>Setup</h2><p>...</p>
+      <h3>Install</h3>
+      <h2>Deployment</h2>
+      <h2>Setup</h2>          <!-- duplicate: kept once -->
+      <h4>too deep</h4>       <!-- h4 ignored -->
+    </body></html>
+    """
+    assert _extract_headings(html) == ["Docs", "Setup", "Install", "Deployment"]
+
+
 def test_read_page_recovers_from_a_bare_slug(monkeypatch):
     # Models often pass "pricing" instead of the exact URL. An unambiguous
     # slug should resolve to the real page instead of wasting a step.

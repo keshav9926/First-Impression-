@@ -93,10 +93,20 @@ def _read_page(url: str) -> str:
         logger.info(
             "read_page truncated %s: %d chars → %d", url, len(body), READ_PAGE_MAX_CHARS
         )
+        # Section map: the cut hides everything past READ_PAGE_MAX_CHARS, and
+        # the model can't search for content it never learned EXISTS (the
+        # unknown-unknown). The page's own headings (~150 tokens) reveal the
+        # full shape, so the model can search_content into any section it
+        # never saw. Only shown when truncating — a fully-visible page needs
+        # no map.
+        headings = page_chunks[0].get("headings", "")
+        section_map = f"Sections on this page: {headings}\n\n" if headings else ""
         body = (
-            body[:READ_PAGE_MAX_CHARS]
-            + "\n\n[... page truncated — use search_content to find specific "
-            "details on this page ...]"
+            section_map
+            + body[:READ_PAGE_MAX_CHARS]
+            + "\n\n[... page truncated — it continues beyond what is shown. "
+            "Use search_content('<section or topic>') to read any section "
+            "listed above that you have not seen ...]"
         )
     return f"Text of {url}:\n\n{body}"
 

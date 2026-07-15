@@ -117,9 +117,11 @@ def ingest(request: IngestRequest) -> IngestResponse:
     if not result.pages:
         raise HTTPException(status_code=404, detail="No readable pages found at this URL.")
 
-    # Page texts -> chunks, each remembering which page it came from (for citations).
+    # Page texts -> chunks, each remembering which page it came from (for
+    # citations) and the page's section headings (for the agent's read_page
+    # section map — Chroma metadata must be scalar, so the list is joined).
     chunks = [
-        {"text": piece, "url": page.url}
+        {"text": piece, "url": page.url, "headings": " · ".join(page.headings)}
         for page in result.pages
         for piece in chunk_text(page.text)
     ]

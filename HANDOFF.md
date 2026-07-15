@@ -61,6 +61,19 @@ Live /report on Groq verified: ~26s, no 413, real page reads, 0 bad citations.
   burst of search_content). Caught live. Was killing the whole report.
 - 28 tests passing.
 
+### Coverage pass: heading-aware section map (closes the truncation blind spot)
+- fetcher.py: _HeadingCollector parses h1-h3 from raw HTML (additive — the
+  trafilatura text pipeline untouched, zero retrieval regression). Page gains
+  .headings; capped 40 headings × 80 chars.
+- Chunk metadata now carries "headings" (joined string; Chroma needs scalar).
+  store.replace_all/all_chunks pass it through (.get default "" = old stores work).
+- read_page: when TRUNCATING, prepends "Sections on this page: …" (~150 tokens)
+  → the agent now SEES what exists past the 4000-char cut and can
+  search_content into any section (kills the unknown-unknown).
+- Re-ingested vortexify: 15 pages, 44 chunks, docs page = 40 headings.
+- Also fixes the weak-citation open item partially (agent knows doc sections).
+- 32 tests. Live verified: map shown, report clean, 0 bad citations.
+
 ### Product pass: friendly outside-in framing + improvement suggestions
 - Reframed prompts (EXPLORE_SYSTEM + SYNTHESIZE_INSTRUCTION): warm colleague
   tone, OUTSIDE-IN delta (what a stranger takes away vs what the site intends —

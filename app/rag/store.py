@@ -50,7 +50,10 @@ def replace_all(chunks: list[dict], embeddings: list[list[float]]) -> int:
     collection.add(
         ids=[f"chunk-{i}" for i in range(len(chunks))],
         documents=[c["text"] for c in chunks],
-        metadatas=[{"url": c["url"]} for c in chunks],  # url kept for citations
+        # url kept for citations; headings (the page's section map, one joined
+        # string) for the agent's read_page. .get: chunks stored before this
+        # feature (or tests) may not carry headings.
+        metadatas=[{"url": c["url"], "headings": c.get("headings", "")} for c in chunks],
         embeddings=embeddings,
     )
     return collection.count()
@@ -90,7 +93,9 @@ def all_chunks() -> list[dict]:
     collection = _collection()
     result = collection.get()  # no filter = everything
     chunks = [
-        {"id": chunk_id, "text": text, "url": meta["url"]}
+        # .get("headings"): data ingested before the heading-map feature has no
+        # headings metadata — old stores keep working, just without the map.
+        {"id": chunk_id, "text": text, "url": meta["url"], "headings": meta.get("headings", "")}
         for chunk_id, text, meta in zip(
             result["ids"], result["documents"], result["metadatas"]
         )
