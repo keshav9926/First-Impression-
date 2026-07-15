@@ -19,6 +19,8 @@
 # FUNCTION_DECLARATIONS is the schema list handed to Gemini so it knows what
 # tools exist and how to call them (name, description, parameters).
 
+from urllib.parse import urlparse
+
 from google.genai import types
 
 from app.config import settings
@@ -50,10 +52,28 @@ def _read_page(url: str) -> str:
     """
     all_chunks = store.all_chunks()
     page_chunks = [c for c in all_chunks if c["url"] == url]
+
+    # Models often pass a bare slug ("pricing", "home") instead of the exact
+    # URL list_pages returned. Recover instead of wasting a step: match a URL
+    # whose path ends with the slug ("home"/"" → the root URL). Only accept an
+    # UNAMBIGUOUS match; if a slug hits several pages, ask for the exact URL.
+    if not page_chunks:
+        available = sorted({c["url"] for c in all_chunks})
+        slug = url.strip().strip("/").lower()
+        if slug in ("", "home", "index"):
+            # Root page = a URL with an empty path (scheme://host/).
+            candidates = [u for u in available if not urlparse(u).path.strip("/")]
+        else:
+            candidates = [u for u in available if u.rstrip("/").lower().endswith("/" + slug)]
+        if len(candidates) == 1:
+            url = candidates[0]
+            page_chunks = [c for c in all_chunks if c["url"] == url]
+
     if not page_chunks:
         available = sorted({c["url"] for c in all_chunks})
         return (
-            f"No page found at {url!r}. Available pages are:\n"
+            f"No page found at {url!r}. Use the EXACT url from list_pages. "
+            "Available pages are:\n"
             + "\n".join(f"- {u}" for u in available)
         )
     body = "\n\n".join(c["text"] for c in page_chunks)

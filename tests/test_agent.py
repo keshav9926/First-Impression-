@@ -52,6 +52,34 @@ def test_read_page_unknown_url_lists_whats_available(monkeypatch):
     assert "https://acme.com/pricing" in out  # helps the model recover
 
 
+def test_read_page_recovers_from_a_bare_slug(monkeypatch):
+    # Models often pass "pricing" instead of the exact URL. An unambiguous
+    # slug should resolve to the real page instead of wasting a step.
+    monkeypatch.setattr(tools.store, "all_chunks", lambda: FAKE_CHUNKS)
+    out = tools.execute_tool("read_page", {"url": "pricing"})
+    assert "$20 per month" in out
+    assert "No page found" not in out
+
+
+def test_read_page_bare_home_resolves_to_root(monkeypatch):
+    # "home"/"index"/"" → the URL with an empty path (the site root).
+    monkeypatch.setattr(tools.store, "all_chunks", lambda: FAKE_CHUNKS)
+    out = tools.execute_tool("read_page", {"url": "home"})
+    assert "builds widgets" in out
+    assert "$20 per month" not in out  # root, not the pricing page
+
+
+def test_read_page_ambiguous_slug_still_asks_for_exact_url(monkeypatch):
+    # If a slug matches more than one page, don't guess — ask for the exact URL.
+    chunks = [
+        {"id": "a", "text": "US pricing.", "url": "https://acme.com/us/pricing"},
+        {"id": "b", "text": "EU pricing.", "url": "https://acme.com/eu/pricing"},
+    ]
+    monkeypatch.setattr(tools.store, "all_chunks", lambda: chunks)
+    out = tools.execute_tool("read_page", {"url": "pricing"})
+    assert "No page found" in out
+
+
 def test_unknown_tool_returns_error_not_exception(monkeypatch):
     out = tools.execute_tool("teleport", {"to": "mars"})
     assert "Unknown tool" in out  # a string, not a raised exception
