@@ -229,11 +229,13 @@ def ask(request: AskRequest) -> AskResponse:
 
 
 @app.post("/report", response_model=ReportResponse)
-def report() -> ReportResponse:
+def report(panel: bool = False) -> ReportResponse:
     """Produce the structured First Impression report from ingested content.
 
     Called by: the client (you). Takes no body — it analyzes whatever site is
-    currently ingested.
+    currently ingested. ?panel=true additionally runs the Phase 4 persona
+    panel (Technical Evaluator / Business Buyer / First-Time End User judge
+    the same evidence in parallel; report gains persona_panel).
     Calls: generate_report() (agent/report.py), which runs the ReAct agent
     (explore with tools) then a schema-constrained synthesis call.
 
@@ -258,7 +260,7 @@ def report() -> ReportResponse:
         raise HTTPException(status_code=409, detail="Nothing ingested yet — call /ingest first.")
 
     try:
-        report_obj, steps_log, pages_examined = generate_report()
+        report_obj, steps_log, pages_examined = generate_report(panel=panel)
     except voyageai.error.RateLimitError:
         # The agent's search_content tool calls Voyage; free-tier limit → 429.
         raise HTTPException(

@@ -76,29 +76,19 @@ def _generate_gemini() -> tuple[FirstImpressionReport, list[dict], list[str]]:
     return report, steps_log, pages_examined
 
 
-def generate_report() -> tuple[FirstImpressionReport, list[dict], list[str]]:
-    """Produce the structured report using the configured agent provider.
-
-    Called by: main.py report(). Returns (report, steps_log, pages_examined).
-    May raise provider rate-limit errors — the endpoint maps them to HTTP codes.
-
-    Whichever driver runs, the report then passes through grounding.enforce_
-    citations: the synthesis LLM GENERATES source_urls, so we verify each one
-    is a real ingested page before returning — rule #2 made structural, not
-    trusted. Runs here (not in the drivers) so both paths are covered once.
+def apply_guards(report: FirstImpressionReport) -> FirstImpressionReport:
+    """The post-synthesis safety pass, shared by every path (both single-agent
+    drivers AND the Phase 4 panel):
+    - citation verification: the synthesis LLM GENERATES source_urls; drop any
+      observation/suggestion citing a non-ingested page (rule #2 structural).
+    - thin-extraction caveat appended IN CODE (not trusted to the LLM): if the
+      crawl captured only a fraction of a JS-rendered site, every reader must
+      see that "not found" may mean "not read".
     """
-    if settings.agent_provider == "groq":
-        report, steps_log, pages_examined = groq_driver.generate()
-    else:
-        report, steps_log, pages_examined = _generate_gemini()
-
     all_chunks = store.all_chunks()
     valid_urls = sorted({c["url"] for c in all_chunks})
     report, _dropped = grounding.enforce_citations(report, valid_urls)
 
-    # Thin-extraction caveat, appended IN CODE (not trusted to the LLM): if the
-    # crawl captured only a fraction of a JS-rendered site, every reader of
-    # this report must see that "not found" may mean "not read".
     if any(c.get("extraction_warning") for c in all_chunks):
         report.scope_note = (
             report.scope_note.rstrip(".")
@@ -107,4 +97,28 @@ def generate_report() -> tuple[FirstImpressionReport, list[dict], list[str]]:
             "about missing or unaddressed topics may reflect the crawler's "
             "limitation, not the site."
         )
-    return report, steps_log, pages_examined
+    return report
+
+
+def generate_report(panel: bool = False) -> tuple[FirstImpressionReport, list[dict], list[str]]:
+    """Produce the structured report using the configured agent provider.
+
+    Called by: main.py report(). Returns (report, steps_log, pages_examined).
+    May raise provider rate-limit errors — the endpoint maps them to HTTP codes.
+    panel=True runs the Phase 4 LangGraph persona panel (explore once → three
+    personas in parallel → merged report with persona_panel attached).
+    """
+    if panel:
+        from app.agent.panel import run_panel  # local: langgraph import stays optional
+
+        report, steps_log, pages_examined = run_panel()
+    elif settings.agent_provider == "groq":
+        report, steps_log, pages_examined = groq_driver.generate()
+    else:
+        report, steps_log, pages_examined = _generate_gemini()
+
+    if not panel:
+        # Single-agent path: the synthesis LLM may have fabricated a panel from
+        # the schema — real impressions come only from the panel graph.
+        report.persona_panel = []
+    return apply_guards(report), steps_log, pages_examined

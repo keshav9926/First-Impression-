@@ -112,9 +112,19 @@ Phase 4 planning: multi-agent crew (researcher / user-sim / evaluator / skeptic)
 - REAL CURE (deferred): headless rendering via Playwright for JS sites.
 - LESSON: one-site eval at 100% masked an entire failure class.
 
-## Then: Phase 4+
-- P4: multi-agent crew (researcher / user-sim / evaluator / skeptic) via LangGraph.
-- P5: evals + guardrails (groundedness LLM-judge + RAGAS, prompt-injection filter).
+## Phase 4 DONE (2026-07-16) — persona panel via LangGraph
+- Scope B: panel only (skeptic → Phase 5). agent/personas.py (3 user-defined
+  personas), agent/panel.py (StateGraph: explore once → 3 parallel persona
+  nodes → merge). groq_driver refactored: explore/flatten_context/synthesize/
+  pages_from_steps reusable; guards → report.apply_guards (all paths).
+- /report?panel=true. Personas = Groq JSON mode + Pydantic validate (1 retry).
+  persona_panel attached programmatically. 40 tests. Live: 3 distinct verdicts,
+  0 bad citations, 92s.
+
+## Then: Phase 5+
+- P5: evals + guardrails (groundedness LLM-judge + RAGAS, prompt-injection
+  filter) + the skeptic pass (folded in from P4).
+- Playwright headless rendering for JS sites (agreed, deferred — in memory).
 - P6: streaming dashboard. P7: MCP server. P8: Langfuse, Docker deploy.
 
 ## Known open items (deferred, documented)

@@ -81,18 +81,13 @@ def _complete(client: groq.Groq, **kwargs):
             # No sleep: it's a sampling glitch, not a rate issue — just re-ask.
 
 
-def generate() -> tuple[FirstImpressionReport, list[dict], list[str]]:
-    """Run explore (Groq) → synthesize (Gemini). Returns (report, steps_log, pages).
+def explore() -> tuple[list, list[dict]]:
+    """Phase A: the Groq ReAct tool-calling loop. Returns (messages, steps_log).
 
-    Phase A: Groq drives the ReAct tool-calling loop — its generous free-tier
-    RPM handles the burst of calls without exhausting a daily quota.
-    Phase B: Gemini produces the final structured report via response_schema —
-    native type-safe schema enforcement, and the "final eval" model the user
-    configured for quality-critical output.
+    Called by: generate() below AND agent/panel.py (Phase 4) — the panel
+    reuses this exact exploration so evidence is gathered ONCE per report.
     """
     groq_client = groq.Groq(api_key=settings.groq_api_key)
-
-    # ---- Phase A: explore (Groq tool-calling loop) ----
     messages: list = [
         {"role": "system", "content": prompts.EXPLORE_SYSTEM},
         {"role": "user", "content": "Analyze this company's public site and prepare its report."},
@@ -141,11 +136,14 @@ def generate() -> tuple[FirstImpressionReport, list[dict], list[str]]:
             steps_log.append({"tool": tc.function.name, "args": args})
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": observation})
 
-    # ---- Phase B: synthesize into the schema (Gemini — final eval) ----
-    # Groq explored; Gemini produces the definitive structured report.
-    # We distill the Groq conversation into a flat context block that Gemini's
-    # stateless API can consume, then use response_schema for native enforcement
-    # (no JSON mode tricks, no Pydantic retry loop needed).
+    return messages, steps_log
+
+
+def flatten_context(messages: list) -> str:
+    """Distill the Groq tool-call conversation into one flat evidence block
+    that a stateless API call (Gemini synthesis, persona nodes) can consume.
+
+    Called by: synthesize() below and agent/panel.py (personas read this)."""
     context_parts: list[str] = []
     for msg in messages:
         role = msg["role"]
@@ -162,18 +160,26 @@ def generate() -> tuple[FirstImpressionReport, list[dict], list[str]]:
             context_parts.append(f"[tool result]: {content}")
         elif content:
             context_parts.append(f"[{role}]: {content}")
+    return "\n".join(context_parts)
 
+
+def synthesize(context: str, extra_context: str = "") -> FirstImpressionReport:
+    """Phase B: Gemini turns the evidence into the schema-constrained report.
+
+    Called by: generate() below and agent/panel.py (which passes the persona
+    panel's findings as extra_context so the final report can reflect them).
+    generate_with_retry: the whole exploration is already paid for by now — a
+    transient Gemini free-tier 429 must not throw that work away.
+    """
     gemini_client = genai.Client(api_key=settings.gemini_api_key)
     synthesis_prompt = (
         "Below is the raw exploration log from a ReAct agent that examined the "
         "company's public website using Groq.\n\n"
-        + "\n".join(context_parts)
+        + context
+        + (f"\n\n{extra_context}" if extra_context else "")
         + "\n\n"
         + prompts.SYNTHESIZE_INSTRUCTION
     )
-    # generate_with_retry: the whole exploration is already paid for by the
-    # time we get here — a transient Gemini free-tier 429 must not throw all
-    # of that work away when waiting a few seconds would save it.
     synthesis_response = generate_with_retry(
         gemini_client,
         settings.gemini_agent_model,
@@ -189,8 +195,22 @@ def generate() -> tuple[FirstImpressionReport, list[dict], list[str]]:
         # Schema-constrained output failed to parse (safety block / malformed
         # JSON) — fail with a clear message, not an AttributeError downstream.
         raise ValueError("Synthesis returned no parseable report — retry the request.")
+    return report
 
-    pages_examined = sorted(
+
+def pages_from_steps(steps_log: list[dict]) -> list[str]:
+    """Distinct urls the agent actually read, from the steps log."""
+    return sorted(
         {s["args"]["url"] for s in steps_log if s["tool"] == "read_page" and "url" in s["args"]}
     )
-    return report, steps_log, pages_examined
+
+
+def generate() -> tuple[FirstImpressionReport, list[dict], list[str]]:
+    """Explore (Groq) → synthesize (Gemini). Returns (report, steps_log, pages).
+
+    Called by: report.generate_report() when agent_provider == "groq".
+    Composed from the reusable pieces above (which agent/panel.py also uses).
+    """
+    messages, steps_log = explore()
+    report = synthesize(flatten_context(messages))
+    return report, steps_log, pages_from_steps(steps_log)

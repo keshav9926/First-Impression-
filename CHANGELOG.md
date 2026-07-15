@@ -2,6 +2,17 @@
 
 Reverse order (newest first). For learning + interview recall.
 
+## Phase 4 — persona panel (LangGraph)
+
+**(this commit) — persona panel: explore once, judge three times**
+- Scope B chosen: panel only; skeptic folded into Phase 5 (avoids duplicate verification layers).
+- Personas (user-defined): Technical Evaluator ("can I integrate this?"), Business Buyer ("should we buy?"), First-Time End User ("can I start?"). Sharp distinct goals = the overlap mitigation.
+- Topology (LangGraph — first genuinely-earned use): explore ONCE (reused groq_driver ReAct) → 3 persona nodes PARALLEL over shared evidence → merge (Gemini synthesis sees panel findings; persona_panel attached PROGRAMMATICALLY from validated objects, never asked of the LLM).
+- Cost design: exploration (tools+Voyage) once; personas = cheap Groq JSON-mode calls (RPM absorbs the burst; Gemini's ~20/day could not). PersonaImpression validated w/ Pydantic, 1 retry on malformed JSON.
+- groq_driver refactored into reusable explore()/flatten_context()/synthesize()/pages_from_steps(); guards extracted to report.apply_guards (shared by all paths). Non-panel path zeroes any LLM-fabricated persona_panel.
+- /report?panel=true. Smoke-tested LangGraph fan-out/reducer BEFORE building (a51d222). 40 tests.
+- Live (vortexify): 92s, 3 distinct verdicts — unanimous "no" for DIFFERENT reasons (buyer: no ROI/logos; user: no signup CTA; tech: API maturity unclear). 0 bad citations.
+
 ## Phase 3 — ReAct report agent
 
 **(next) — thin-extraction guard (JS-rendered sites)**
