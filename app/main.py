@@ -128,6 +128,7 @@ def ingest(request: IngestRequest) -> IngestResponse:
             "text": piece,
             "url": page.url,
             "headings": " · ".join(page.headings),
+            "ctas": " · ".join(page.ctas),  # primary signup/demo/login actions
             "extraction_warning": result.thin_extraction,
         }
         for page in result.pages

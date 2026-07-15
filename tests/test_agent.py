@@ -114,6 +114,37 @@ def test_is_thin_extraction_needs_both_signals():
     assert _is_thin_extraction(0, 0) is False
 
 
+def test_read_page_surfaces_ctas(monkeypatch):
+    # CTAs (stripped from body by boilerplate removal) must appear on read —
+    # the fix for the false "no signup button" persona verdict.
+    chunks = [{**FAKE_CHUNKS[0], "ctas": "Try for free · Book a demo · Sign in"}]
+    monkeypatch.setattr(tools.store, "all_chunks", lambda: chunks)
+    out = tools.execute_tool("read_page", {"url": "https://acme.com/"})
+    assert "Primary actions available on this page: Try for free" in out
+
+
+def test_read_page_no_cta_line_when_absent(monkeypatch):
+    monkeypatch.setattr(tools.store, "all_chunks", lambda: FAKE_CHUNKS)
+    out = tools.execute_tool("read_page", {"url": "https://acme.com/"})
+    assert "Primary actions" not in out
+
+
+def test_extract_ctas_matches_signup_family():
+    from app.ingestion.fetcher import _extract_ctas
+
+    html = """
+    <header>
+      <a href="/signup"><span>Try for free</span></a>
+      <button>Book a Demo</button>
+      <a href="/login">Sign in</a>
+      <a href="/blog">Read our blog</a>   <!-- not a CTA -->
+      <a href="/x">Try for free</a>        <!-- dup, deduped -->
+    </header>
+    """
+    ctas = _extract_ctas(html)
+    assert ctas == ["Try for free", "Book a Demo", "Sign in"]
+
+
 def test_extract_headings_pulls_h1_to_h3_in_order():
     from app.ingestion.fetcher import _extract_headings
 

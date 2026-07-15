@@ -123,7 +123,14 @@ def _read_page(url: str) -> str:
             "Use search_content('<section or topic>') to read any section "
             "listed above that you have not seen ...]"
         )
-    return f"Text of {url}:\n\n{body}"
+    # Primary actions (Sign up / Try free / Book a demo): these live in the
+    # header/footer that trafilatura strips as boilerplate, so they are absent
+    # from `body` — but they are the #1 signal for the "can I get started?"
+    # question. Surfaced on EVERY read (not truncation-only): a missing signup
+    # CTA is a real finding; a present one must not read as missing.
+    ctas = page_chunks[0].get("ctas", "")
+    cta_line = f"Primary actions available on this page: {ctas}\n\n" if ctas else ""
+    return f"Text of {url}:\n\n{cta_line}{body}"
 
 
 def _search_content(query: str) -> str:

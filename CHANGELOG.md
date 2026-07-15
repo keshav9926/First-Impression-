@@ -4,6 +4,12 @@ Reverse order (newest first). For learning + interview recall.
 
 ## Phase 4 — persona panel (LangGraph)
 
+**(this commit) — CTA extraction (fixes false "no signup button")**
+- BROKE (found by user comparing report to the live homepage): End User persona reported "no clear Sign Up button" — but vortexify has a big "Try for free". Cause: favor_precision=True (Phase 1, deliberately) strips header/footer boilerplate → deletes the CTA buttons → persona never saw them. Confirmed: "try for free"/"sign up"/"book a demo" absent from entire store.
+- FIX: _CtaCollector parses <a>/<button> labels from RAW HTML matching a signup/trial/demo/login pattern list (mirrors heading map). Rides chunk metadata; read_page surfaces "Primary actions available on this page: …" on EVERY read (not truncation-only — a real signup signal). favor_precision stays on → RAG chunks still clean.
+- Live: End User now leads with "Sign In · Book a Demo · Try for free · Get started today"; false friction gone, remaining objections legit (jargon, no tutorial). 43 tests.
+- LESSON: our own boilerplate-stripping choice created a false gap in the highest-signal element. Recover high-signal boilerplate separately, don't loosen the filter.
+
 **(this commit) — persona panel: explore once, judge three times**
 - Scope B chosen: panel only; skeptic folded into Phase 5 (avoids duplicate verification layers).
 - Personas (user-defined): Technical Evaluator ("can I integrate this?"), Business Buyer ("should we buy?"), First-Time End User ("can I start?"). Sharp distinct goals = the overlap mitigation.

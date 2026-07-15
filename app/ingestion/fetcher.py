@@ -56,6 +56,7 @@ class Page:
     url: str
     text: str
     headings: list[str]
+    ctas: list[str]  # primary call-to-action button/link labels (Sign up, Try free, ...)
 
 
 # Detecting a JS-rendered site (SPA / Framer / Webflow) where the static HTML
@@ -161,6 +162,74 @@ class _HeadingCollector(HTMLParser):
 # docs ToC, tiny in tokens either way.
 _MAX_HEADINGS = 40
 _MAX_HEADING_CHARS = 80
+
+
+# The single most important signal for the "can I get started?" persona lives
+# in the header/footer — "Try for free", "Sign up", "Book a demo" — which
+# trafilatura's favor_precision=True strips as boilerplate (deliberately, to
+# keep nav-debris out of RAG chunks). So we recover JUST these high-signal
+# calls-to-action from the raw HTML, separately, without re-polluting retrieval.
+# Match on visible LABEL text (a signup button rarely lies about being one).
+_CTA_PATTERNS = (
+    "sign up", "signup", "sign in", "signin", "log in", "login",
+    "get started", "try for free", "try free", "start free", "free trial",
+    "book a demo", "request a demo", "get a demo", "request access",
+    "get started for free", "start now", "join",
+)
+_MAX_CTAS = 12
+_MAX_CTA_CHARS = 40
+
+
+class _CtaCollector(HTMLParser):
+    """Collect visible labels of <a>/<button> elements that look like primary
+    calls to action (signup / trial / demo / login). Same buffer-on-tag pattern
+    as _HeadingCollector; matches the accumulated label against _CTA_PATTERNS."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.ctas: list[str] = []
+        self._depth = 0  # >0 while inside an <a>/<button> (handles nested spans)
+        self._buffer: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in ("a", "button"):
+            if self._depth == 0:
+                self._buffer = []
+            self._depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in ("a", "button") and self._depth > 0:
+            self._depth -= 1
+            if self._depth == 0:
+                label = " ".join("".join(self._buffer).split())
+                if label and any(p in label.lower() for p in _CTA_PATTERNS):
+                    self.ctas.append(label[:_MAX_CTA_CHARS])
+
+    def handle_data(self, data: str) -> None:
+        if self._depth > 0:
+            self._buffer.append(data)
+
+
+def _extract_ctas(html: str) -> list[str]:
+    """Primary call-to-action labels on a page, deduped, in document order.
+
+    Called by: crawl(), once per fetched page. Rides on Page.ctas → chunk
+    metadata → read_page surfaces them so the 'can I sign up?' persona sees
+    the entry points that boilerplate-stripping removed from the body text."""
+    collector = _CtaCollector()
+    try:
+        collector.feed(html)
+    except Exception:
+        return []
+    seen: set[str] = set()
+    ctas = []
+    for c in collector.ctas:
+        if c.lower() not in seen:
+            seen.add(c.lower())
+            ctas.append(c)
+        if len(ctas) >= _MAX_CTAS:
+            break
+    return ctas
 
 
 def _extract_headings(html: str) -> list[str]:
@@ -280,7 +349,14 @@ def crawl(start_url: str, max_pages: int) -> CrawlResult:
                 seed_text_chars = len(text)
                 seed_html_chars = len(html)
             if text.strip():
-                pages.append(Page(url=url, text=text, headings=_extract_headings(html)))
+                pages.append(
+                    Page(
+                        url=url,
+                        text=text,
+                        headings=_extract_headings(html),
+                        ctas=_extract_ctas(html),
+                    )
+                )
 
             # Feed new same-domain links into the queue for later iterations.
             for link in _extract_links(html, base_url=url, domain=domain):
