@@ -20,12 +20,15 @@
 # tools exist and how to call them (name, description, parameters).
 
 import json
+import logging
 from urllib.parse import urlparse
 
 from google.genai import types
 
 from app.config import settings
 from app.rag import pipeline, store
+
+logger = logging.getLogger("first_impression")
 
 # Tool outputs are BOUNDED so the ReAct history can't grow past a provider's
 # per-request context/token budget (Groq free tier is only ~12K tokens/minute,
@@ -35,6 +38,11 @@ from app.rag import pipeline, store
 READ_PAGE_MAX_CHARS = 4000
 SEARCH_TOP_K = 3
 SEARCH_SNIPPET_CHARS = 1200
+# min_relevance is a single threshold tuned on ONE site — a real topic that
+# scores just under it would otherwise read as a hard "not covered", which the
+# agent turns into a FALSE "unanswered question". If the best match lands within
+# this margin below the bar, we report it as UNCERTAIN instead of absent.
+SEARCH_NEAR_MISS_MARGIN = 0.10
 
 
 def _list_pages() -> str:
@@ -79,6 +87,12 @@ def _read_page(url: str) -> str:
         )
     body = "\n\n".join(c["text"] for c in page_chunks)
     if len(body) > READ_PAGE_MAX_CHARS:
+        # The model is told (below) to use search_content for the rest, but the
+        # cut is otherwise invisible to us — log it so we can see when a page is
+        # too big for a single read to represent faithfully.
+        logger.info(
+            "read_page truncated %s: %d chars → %d", url, len(body), READ_PAGE_MAX_CHARS
+        )
         body = (
             body[:READ_PAGE_MAX_CHARS]
             + "\n\n[... page truncated — use search_content to find specific "
@@ -97,6 +111,15 @@ def _search_content(query: str) -> str:
     hits = pipeline.retrieve(query, top_k=SEARCH_TOP_K)
     relevant = [h for h in hits if h["relevance"] >= settings.min_relevance]
     if not relevant:
+        top = hits[0]["relevance"] if hits else 0.0
+        if top >= settings.min_relevance - SEARCH_NEAR_MISS_MARGIN:
+            # Borderline: don't assert the site ignores this — say so honestly
+            # so it doesn't become a false "unanswered question".
+            return (
+                f"No STRONGLY relevant content for {query!r} (best match {top:.2f}, "
+                f"just under the {settings.min_relevance:.2f} bar). The site may "
+                "touch on this weakly — treat as uncertain, not a confirmed gap."
+            )
         return f"No content relevant to {query!r} was found in the ingested pages."
     return "\n\n".join(
         f"[relevance {h['relevance']:.2f}] (from {h['url']})\n{h['text'][:SEARCH_SNIPPET_CHARS]}"

@@ -30,8 +30,20 @@ from app.config import settings
 from app.schemas import FirstImpressionReport
 
 _MAX_RATE_RETRIES = 6
+# Llama occasionally emits malformed tool-call syntax that Groq rejects with a
+# 400 "tool_use_failed" — a STOCHASTIC generation glitch, not a bug in our
+# request. Groq samples with temperature, so simply re-asking usually produces
+# valid syntax. Retry a few times before giving up.
+_MAX_TOOL_FORMAT_RETRIES = 3
 # Step cap lives in config (settings.agent_max_steps) — ONE value shared with
 # the Gemini driver so the two can never drift apart.
+
+
+def _is_tool_format_error(exc: groq.BadRequestError) -> bool:
+    """True for the transient 'tool_use_failed' 400 (retriable), False for any
+    other 400 (a real bad request — must NOT be retried, that would just mask a
+    genuine bug behind three identical failures)."""
+    return "tool_use_failed" in str(exc)
 
 
 def _retry_after_seconds(exc: groq.RateLimitError) -> float:
@@ -47,14 +59,26 @@ def _retry_after_seconds(exc: groq.RateLimitError) -> float:
 
 
 def _complete(client: groq.Groq, **kwargs):
-    """chat.completions.create with retry on free-tier 429s (honor Retry-After)."""
-    for attempt in range(_MAX_RATE_RETRIES):
+    """chat.completions.create, retrying two distinct transient failures:
+      - 429 rate limits (honor Retry-After),
+      - 400 'tool_use_failed' (Llama emitted malformed tool-call syntax).
+    Any other error propagates immediately — a real bug shouldn't be retried.
+    """
+    rate_attempts = 0
+    format_attempts = 0
+    while True:
         try:
             return client.chat.completions.create(model=settings.groq_model, **kwargs)
         except groq.RateLimitError as exc:
-            if attempt == _MAX_RATE_RETRIES - 1:
+            rate_attempts += 1
+            if rate_attempts >= _MAX_RATE_RETRIES:
                 raise
             time.sleep(min(_retry_after_seconds(exc), 60))
+        except groq.BadRequestError as exc:
+            format_attempts += 1
+            if not _is_tool_format_error(exc) or format_attempts >= _MAX_TOOL_FORMAT_RETRIES:
+                raise
+            # No sleep: it's a sampling glitch, not a rate issue — just re-ask.
 
 
 def generate() -> tuple[FirstImpressionReport, list[dict], list[str]]:

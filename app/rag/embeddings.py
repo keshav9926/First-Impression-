@@ -18,6 +18,7 @@
 import time
 
 import voyageai
+import voyageai.error
 
 from app.config import settings
 
@@ -30,6 +31,11 @@ from app.config import settings
 _MAX_BATCH_TEXTS = 128  # hard API limit: max texts per request
 _MAX_BATCH_CHARS = 28_000  # ~7K tokens — under the free tier's 10K TPM
 _SECONDS_BETWEEN_BATCHES = 21  # free tier: max 3 requests per minute
+# The /report agent fires several search_content calls in one run, each an
+# embed_query — a burst easily trips the 3-requests/minute cap. A single 429
+# there would discard the whole (already-paid-for) exploration, so embed_query
+# paces and retries into the next minute-window instead of failing the run.
+_MAX_QUERY_RETRIES = 4
 
 
 def _client() -> voyageai.Client:
@@ -90,6 +96,16 @@ def embed_query(question: str) -> list[float]:
     Output goes to: store.search(), which finds the nearest stored chunks.
 
     Note input_type="query" (vs "document" above) — see the header comment.
+    Retries free-tier 429s by pacing into the next per-minute window; other
+    Voyage errors propagate (callers map them to HTTP status codes).
     """
-    result = _client().embed([question], model=settings.embedding_model, input_type="query")
-    return result.embeddings[0]
+    for attempt in range(_MAX_QUERY_RETRIES):
+        try:
+            result = _client().embed(
+                [question], model=settings.embedding_model, input_type="query"
+            )
+            return result.embeddings[0]
+        except voyageai.error.RateLimitError:
+            if attempt == _MAX_QUERY_RETRIES - 1:
+                raise  # exhausted — let the caller surface a 429
+            time.sleep(_SECONDS_BETWEEN_BATCHES)

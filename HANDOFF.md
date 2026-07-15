@@ -44,8 +44,24 @@ AI system: analyze a startup's PUBLIC site, output a cited "first impression" re
 - Groq free: 12K tokens/MINUTE → bounded tool outputs (tools.py: READ_PAGE_MAX_CHARS 4000, SEARCH_TOP_K 3) + MAX_STEPS 5.
 
 ## Phase 3 CLOSED (2026-07-15) — hardening done before Phase 4
-Live /report on Groq verified twice: ~30s, no 413, real page reads, useful report.
-Fixes landed:
+Live /report on Groq verified: ~26s, no 413, real page reads, 0 bad citations.
+
+### Accuracy/robustness pass (round 2)
+- CITATION VERIFICATION (rule #2 structural): agent/grounding.py.enforce_citations
+  drops any Observation whose GENERATED source_url isn't a real ingested page.
+  Runs in report.generate_report() → covers both drivers. url-normalized
+  (trailing slash / case tolerant). Was the top risk: synthesis LLM invents urls.
+- search_content near-miss: a best match just under min_relevance now returns
+  "uncertain", not a hard "not covered" → stops FALSE unanswered_questions.
+  (min_relevance still tuned on ONE site — real fix is multi-site eval later.)
+- read_page truncation now LOGGED (docs page is 44K chars → 4K). Silent before.
+- Groq tool_use_failed 400 (Llama emits malformed tool-call syntax): _complete
+  retries it up to 3x (stochastic glitch); persists → 502. Caught live.
+- embed_query retries Voyage 3-RPM 429 into next minute-window (agent fires a
+  burst of search_content). Caught live. Was killing the whole report.
+- 28 tests passing.
+
+### Round 1 fixes:
 - read_page bare-slug bug (agent passed "home"/"pricing" as urls — every read
   silently failed; prompt now demands exact urls + tool recovers unambiguous slugs).
 - Step cap unified → settings.agent_max_steps (was duplicated in prompts.py + groq_driver).

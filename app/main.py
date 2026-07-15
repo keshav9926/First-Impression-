@@ -261,6 +261,16 @@ def report() -> ReportResponse:
             status_code=429,
             detail="Groq rate limit hit during analysis — wait a minute and retry.",
         )
+    except groq.BadRequestError as exc:
+        # Persistent 'tool_use_failed' after in-driver retries: the model kept
+        # emitting malformed tool-call syntax. Upstream failure, not our bug.
+        if "tool_use_failed" not in str(exc):
+            raise
+        raise HTTPException(
+            status_code=502,
+            detail="The exploration model repeatedly produced malformed tool "
+            "calls — please retry.",
+        )
     except genai_errors.ClientError as exc:
         # Gemini quota exhausted despite generate_with_retry (a truly spent
         # DAILY quota looks like endless 429s). Other client errors are real

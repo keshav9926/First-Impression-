@@ -21,10 +21,11 @@
 from google import genai
 from google.genai import types
 
-from app.agent import groq_driver, prompts, tools
+from app.agent import grounding, groq_driver, prompts, tools
 from app.agent.llm import generate_with_retry
 from app.agent.react import run_react_loop
 from app.config import settings
+from app.rag import store
 from app.schemas import FirstImpressionReport
 
 
@@ -80,7 +81,17 @@ def generate_report() -> tuple[FirstImpressionReport, list[dict], list[str]]:
 
     Called by: main.py report(). Returns (report, steps_log, pages_examined).
     May raise provider rate-limit errors — the endpoint maps them to HTTP codes.
+
+    Whichever driver runs, the report then passes through grounding.enforce_
+    citations: the synthesis LLM GENERATES source_urls, so we verify each one
+    is a real ingested page before returning — rule #2 made structural, not
+    trusted. Runs here (not in the drivers) so both paths are covered once.
     """
     if settings.agent_provider == "groq":
-        return groq_driver.generate()
-    return _generate_gemini()
+        report, steps_log, pages_examined = groq_driver.generate()
+    else:
+        report, steps_log, pages_examined = _generate_gemini()
+
+    valid_urls = sorted({c["url"] for c in store.all_chunks()})
+    report, _dropped = grounding.enforce_citations(report, valid_urls)
+    return report, steps_log, pages_examined

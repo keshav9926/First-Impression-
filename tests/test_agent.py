@@ -13,7 +13,8 @@ from types import SimpleNamespace
 
 from google.genai import types
 
-from app.agent import react, tools
+from app.agent import grounding, react, tools
+from app.schemas import FirstImpressionReport, Observation
 
 FAKE_CHUNKS = [
     {"id": "chunk-0", "text": "Acme builds widgets for small teams.", "url": "https://acme.com/"},
@@ -83,6 +84,62 @@ def test_read_page_ambiguous_slug_still_asks_for_exact_url(monkeypatch):
 def test_unknown_tool_returns_error_not_exception(monkeypatch):
     out = tools.execute_tool("teleport", {"to": "mars"})
     assert "Unknown tool" in out  # a string, not a raised exception
+
+
+def test_search_content_borderline_is_uncertain_not_a_gap(monkeypatch):
+    # Best match sits just under the bar → uncertain, NOT a confirmed absence.
+    monkeypatch.setattr(tools.settings, "min_relevance", 0.45)
+    monkeypatch.setattr(
+        tools.pipeline, "retrieve", lambda q, top_k: [{"relevance": 0.40, "url": "u", "text": "t"}]
+    )
+    out = tools.execute_tool("search_content", {"query": "security"})
+    assert "uncertain" in out.lower()
+    assert "was found" not in out  # not the hard "nothing found" wording
+
+
+def test_search_content_far_below_bar_is_a_hard_miss(monkeypatch):
+    # Best match far under the bar → the site really doesn't cover it.
+    monkeypatch.setattr(tools.settings, "min_relevance", 0.45)
+    monkeypatch.setattr(
+        tools.pipeline, "retrieve", lambda q, top_k: [{"relevance": 0.10, "url": "u", "text": "t"}]
+    )
+    out = tools.execute_tool("search_content", {"query": "security"})
+    assert "No content relevant" in out
+
+
+# ----- grounding.py: citation verification (rule #2 made structural) -----
+
+
+def _report_with_urls(*urls):
+    """A minimal report whose what_the_product_is cites the given source urls."""
+    return FirstImpressionReport(
+        company="Acme",
+        what_the_product_is=[
+            Observation(claim=f"claim {i}", evidence="e", source_url=u)
+            for i, u in enumerate(urls)
+        ],
+        likely_new_user_journey=[],
+        friction_points=[],
+        standout_strengths=[],
+        unanswered_questions=["untouched"],
+        scope_note="public only",
+    )
+
+
+def test_enforce_citations_drops_hallucinated_urls():
+    report = _report_with_urls("https://acme.com/", "https://acme.com/ghost")
+    report, dropped = grounding.enforce_citations(report, ["https://acme.com/"])
+    urls = [o.source_url for o in report.what_the_product_is]
+    assert urls == ["https://acme.com/"]  # real kept, ghost dropped
+    assert len(dropped) == 1 and dropped[0]["source_url"] == "https://acme.com/ghost"
+    assert report.unanswered_questions == ["untouched"]  # non-cited field untouched
+
+
+def test_enforce_citations_tolerates_trailing_slash_and_case():
+    # Synthesis may emit a trailing slash / different case than the store.
+    report = _report_with_urls("https://Acme.com/Docs/")
+    report, dropped = grounding.enforce_citations(report, ["https://acme.com/docs"])
+    assert len(report.what_the_product_is) == 1 and not dropped
 
 
 # ----- react.py: the loop, driven by a fake LLM -----
