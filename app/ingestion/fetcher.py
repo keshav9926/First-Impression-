@@ -58,11 +58,33 @@ class Page:
     headings: list[str]
 
 
-# Below this text/HTML ratio the site is almost certainly JS-rendered (SPA /
-# Framer / Webflow): the HTML is a shell and the real content hydrates in the
-# browser, which a static fetch never sees. Server-rendered sites extract
-# 5-20%+; trynarrative.com (Framer) extracted 0.1%. 1% is a conservative line.
-THIN_EXTRACTION_RATIO = 0.01
+# Detecting a JS-rendered site (SPA / Framer / Webflow) where the static HTML
+# is a shell and the real content hydrates in the browser (a static fetch never
+# sees it). Calibrated on two real HOMEPAGES (2026-07-15):
+#   vortexify.ai (server-rendered): 2200 text / 230K html = 0.96%  → NOT thin
+#   trynarrative.com (Framer/JS):     368 text / 388K html = 0.09%  → thin
+# Ratio alone is fragile (modern HTML is bloated even when server-rendered — the
+# two sites sit only ~10x apart). A real JS shell shows BOTH signatures: almost
+# no extractable text AND a tiny text/HTML ratio. Requiring BOTH avoids flagging
+# a genuinely sparse-but-fully-rendered landing page. Only 2 data points so far
+# — revisit thresholds as more sites are tested.
+_THIN_SEED_MAX_TEXT_CHARS = 800  # below this the page is nearly empty
+_THIN_SEED_MAX_RATIO = 0.005  # AND below this it's mostly HTML shell
+
+
+def _is_thin_extraction(seed_text_chars: int, seed_html_chars: int) -> bool:
+    """True when the SEED page looks like an unrendered JS shell — very little
+    text AND a tiny text/HTML ratio (both required, so a small fully-rendered
+    page is not mistaken for a broken one).
+
+    Called by: crawl(). The seed (usually the homepage) is the right page to
+    judge on: it carries the first impression, and it's exactly the page that
+    hydrates client-side on JS sites. Big static legal pages (privacy/terms)
+    would otherwise dilute an aggregate ratio and hide the problem."""
+    if seed_html_chars == 0:
+        return False
+    ratio = seed_text_chars / seed_html_chars
+    return seed_text_chars < _THIN_SEED_MAX_TEXT_CHARS and ratio < _THIN_SEED_MAX_RATIO
 
 
 @dataclass
@@ -217,9 +239,10 @@ def crawl(start_url: str, max_pages: int) -> CrawlResult:
     seen = {start_url}
     pages: list[Page] = []
     skipped_by_robots = 0
-    html_chars_total = 0  # raw HTML seen (denominator of extraction_ratio)
+    html_chars_total = 0  # raw HTML seen (denominator of aggregate ratio)
     text_chars_total = 0  # readable text extracted (numerator)
-    seed_ratio: float | None = None  # the FIRST fetched page's own ratio
+    seed_text_chars = 0  # the FIRST fetched page's own text/html (the thin signal)
+    seed_html_chars = 0
 
     headers = {"User-Agent": settings.crawler_user_agent}
     with httpx.Client(headers=headers, follow_redirects=True, timeout=15.0) as client:
@@ -252,13 +275,10 @@ def crawl(start_url: str, max_pages: int) -> CrawlResult:
             text = trafilatura.extract(html, favor_precision=True) or ""
             html_chars_total += len(html)
             text_chars_total += len(text)
-            if seed_ratio is None and html:
-                # The seed (usually the homepage) is the page that carries the
-                # first impression — and on JS-rendered sites it's exactly the
-                # page whose content hydrates in the browser. Big static legal
-                # pages (privacy/terms) can mask that in the aggregate ratio,
-                # so the seed's own ratio is tracked as a separate signal.
-                seed_ratio = len(text) / len(html)
+            if seed_html_chars == 0 and html:
+                # Capture the seed page's own text/html — see _is_thin_extraction.
+                seed_text_chars = len(text)
+                seed_html_chars = len(html)
             if text.strip():
                 pages.append(Page(url=url, text=text, headings=_extract_headings(html)))
 
@@ -271,16 +291,9 @@ def crawl(start_url: str, max_pages: int) -> CrawlResult:
             time.sleep(settings.request_delay_seconds)  # politeness delay (rate limit)
 
     ratio = (text_chars_total / html_chars_total) if html_chars_total else 1.0
-    # Thin if EITHER signal trips: aggregate (whole crawl was thin) or seed
-    # (the homepage — the first-impression page — was thin, even when big
-    # static legal pages inflate the aggregate; seen live on trynarrative.com:
-    # homepage 0.001, aggregate 0.034 thanks to privacy/terms text).
-    thin = ratio < THIN_EXTRACTION_RATIO or (
-        seed_ratio is not None and seed_ratio < THIN_EXTRACTION_RATIO
-    )
     return CrawlResult(
         pages=pages,
         skipped_by_robots=skipped_by_robots,
         extraction_ratio=ratio,
-        thin_extraction=thin,
+        thin_extraction=_is_thin_extraction(seed_text_chars, seed_html_chars),
     )

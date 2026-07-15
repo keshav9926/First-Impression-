@@ -93,6 +93,27 @@ def test_read_page_short_page_skips_the_map(monkeypatch):
     assert "Sections on this page" not in out
 
 
+def test_is_thin_extraction_calibrated_on_real_sites():
+    from app.ingestion.fetcher import _is_thin_extraction
+
+    # Real measurements (2026-07-15):
+    assert _is_thin_extraction(368, 388_217) is True  # trynarrative (Framer/JS)
+    assert _is_thin_extraction(2200, 229_954) is False  # vortexify (server-rendered)
+
+
+def test_is_thin_extraction_needs_both_signals():
+    from app.ingestion.fetcher import _is_thin_extraction
+
+    # Low ratio but plenty of text (long content-rich page) → NOT thin.
+    assert _is_thin_extraction(5000, 2_000_000) is False
+    # Little text but high ratio (genuinely sparse, fully-rendered page) → NOT thin.
+    assert _is_thin_extraction(300, 6_000) is False
+    # Both tiny → thin.
+    assert _is_thin_extraction(300, 400_000) is True
+    # No HTML at all → not thin (avoids div-by-zero).
+    assert _is_thin_extraction(0, 0) is False
+
+
 def test_extract_headings_pulls_h1_to_h3_in_order():
     from app.ingestion.fetcher import _extract_headings
 
