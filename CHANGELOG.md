@@ -4,19 +4,35 @@ Reverse order (newest first). For learning + interview recall.
 
 ## Phase 3 — ReAct report agent
 
+**1634c31 — heading-aware section map (coverage)**
+- GAP (found by user pushing on the design): read_page truncates a long page at 4000 chars → agent blind past the cut, can't search for sections it never learned EXIST (unknown-unknown). Docs page = 44K chars.
+- FIX: parse h1–h3 from raw HTML (`_HeadingCollector`, same HTMLParser trick as `_LinkCollector`). Headings ride as chunk metadata. read_page prepends "Sections on this page: …" (~150 tokens) ONLY when truncating (short pages pay nothing).
+- Additive: trafilatura TEXT pipeline untouched → zero retrieval regression. Old stores keep working (`.get` default ""). Caps: 40 headings × 80 chars, deduped.
+- Re-ingested vortexify: 15 pages (crawl found 5 new use-case pages), 44 chunks, docs = 40 headings (hit cap). Bonus: partially fixes the weak-citation open item (agent now knows doc section names).
+- "Cheap" here = TOKENS not money — map is ~150 tok vs the 1000-tok prefix; everything stays free-tier.
+
 **04d2738 — friendly outside-in framing + grounded suggestions**
-- Report prompts reframed: prospective-user voice, actionable improvement notes.
+- Prompts reframed: warm colleague voice; lead with the OUTSIDE-IN delta (what a stranger takes away vs what the site intends = the founder's blind spot = the actual value); kind about gaps.
+- ADDED improvement_opportunities: 2–4 friendly "you might consider…" notes. Separate `ImprovementOpportunity` type + field so OPINION never contaminates cited FACT (rules #2/#3 preserved). Each cites the page it responds to; defaults `[]` (no invented filler).
+- grounding now verifies suggestion source_urls too.
 
-**c5e495c — verify citations + survive live glitches**
-- BROKE→FIXED: Llama emits malformed tool-call syntax → Groq 400 `tool_use_failed`. Added retry (stochastic glitch, re-ask). Only that 400 retried; other 400s propagate.
-- Added citation verification.
+**c5e495c — verify citations + survive live glitches (hardening round 2)**
+- ADDED (the diabolical fix): `grounding.enforce_citations` — the synthesis LLM GENERATES source_urls, nothing guaranteed they're real. Now drop any observation/suggestion citing a non-ingested page. Rule #2 made STRUCTURAL, not trusted. URL-normalized (trailing-slash / case tolerant).
+- BROKE→FIXED (live): Llama emits malformed tool-call syntax → Groq 400 `tool_use_failed`. Retry the stochastic glitch (3×, re-ask); only that 400 retried, others propagate; persists → 502.
+- BROKE→FIXED (live): agent bursts search_content → Voyage 3-RPM 429 killed the whole report. `embed_query` now retries into the next minute-window.
+- search_content near-miss margin (0.10): borderline score → "uncertain", not a false "not covered" (min_relevance still tuned on ONE site — real fix = multi-site eval later).
+- read_page truncation now LOGGED (docs 44K→4K was silent).
 
-**bc583c6 — Phase 3 hardening**
+**bc583c6 — Phase 3 hardening (round 1)**
+- Step cap unified → `settings.agent_max_steps` (was duplicated in prompts.py + groq_driver → drift risk).
 - Repeat-call guard: same (tool,args) twice → reminder, not re-execute. Saves steps + tokens.
-- search_content near-miss margin (0.10): borderline score → "uncertain", not false "not covered".
+- Synthesis (Phase B) now uses `generate_with_retry` — a Gemini 429 on the LAST call no longer discards the whole (already-paid-for) exploration.
+- `parsed=None` guard in both drivers → clear ValueError (was AttributeError deep in the stack).
+- /report maps Gemini 429 → HTTP 429 (was opaque 500); ValueError → 502.
+- Groq args "null" edge: `json.loads("null")` → None → crash. Guarded with `or {}`.
 
 **2424cb5 — read_page bare-slug fix**
-- BROKE: agent passed "pricing"/"home" not exact URL → read_page failed → agent never read pages. FIXED: slug→URL recovery (unambiguous match only).
+- BROKE: agent passed "pricing"/"home" not exact URL → read_page failed silently → agent never actually read pages (report propped up by search + error-msg URL echoes). FIXED: slug→URL recovery (unambiguous match only) + prompt demands exact URLs.
 
 **03adf5f — Groq explore + Gemini synthesize**
 - /ask default → Groq (high free RPM). /report: Groq drives ReAct loop, Gemini does final structured synthesis (response_schema). ReAct cap 5 steps.
