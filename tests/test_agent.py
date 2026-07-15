@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from google.genai import types
 
 from app.agent import grounding, react, tools
-from app.schemas import FirstImpressionReport, Observation
+from app.schemas import FirstImpressionReport, ImprovementOpportunity, Observation
 
 FAKE_CHUNKS = [
     {"id": "chunk-0", "text": "Acme builds widgets for small teams.", "url": "https://acme.com/"},
@@ -140,6 +140,28 @@ def test_enforce_citations_tolerates_trailing_slash_and_case():
     report = _report_with_urls("https://Acme.com/Docs/")
     report, dropped = grounding.enforce_citations(report, ["https://acme.com/docs"])
     assert len(report.what_the_product_is) == 1 and not dropped
+
+
+def test_enforce_citations_also_verifies_improvement_suggestions():
+    # A friendly suggestion pinned to a hallucinated page must be dropped too —
+    # advice is grounded to a real page or it does not ship.
+    report = _report_with_urls("https://acme.com/")
+    report.improvement_opportunities = [
+        ImprovementOpportunity(
+            observed="pricing needs a form", suggestion="show public pricing",
+            source_url="https://acme.com/pricing",  # real
+        ),
+        ImprovementOpportunity(
+            observed="made up", suggestion="do a thing",
+            source_url="https://acme.com/ghost",  # hallucinated
+        ),
+    ]
+    report, dropped = grounding.enforce_citations(
+        report, ["https://acme.com/", "https://acme.com/pricing"]
+    )
+    kept = [o.source_url for o in report.improvement_opportunities]
+    assert kept == ["https://acme.com/pricing"]
+    assert any(d["source_url"] == "https://acme.com/ghost" for d in dropped)
 
 
 # ----- react.py: the loop, driven by a fake LLM -----

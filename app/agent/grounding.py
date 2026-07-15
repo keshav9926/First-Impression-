@@ -24,13 +24,17 @@ from app.schemas import FirstImpressionReport
 
 logger = logging.getLogger("first_impression")
 
-# The report fields that hold cited Observations (unanswered_questions and
-# scope_note carry no source_url, so they are not validated here).
+# The report fields whose items carry a source_url and so must be verified
+# (unanswered_questions and scope_note carry none). improvement_opportunities
+# holds suggestions, not observations, but each still cites the page it responds
+# to — so a suggestion pinned to a hallucinated url is dropped just like a
+# fabricated observation.
 _OBSERVATION_FIELDS = (
     "what_the_product_is",
     "likely_new_user_journey",
     "friction_points",
     "standout_strengths",
+    "improvement_opportunities",
 )
 
 
@@ -65,8 +69,10 @@ def enforce_citations(
             if _normalize(obs.source_url) in valid:
                 kept.append(obs)
             else:
+                # Observation has .claim; ImprovementOpportunity has .suggestion.
+                label = getattr(obs, "claim", None) or getattr(obs, "suggestion", "")
                 dropped.append(
-                    {"field": field, "claim": obs.claim, "source_url": obs.source_url}
+                    {"field": field, "claim": label, "source_url": obs.source_url}
                 )
         setattr(report, field, kept)
 

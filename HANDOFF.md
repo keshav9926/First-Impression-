@@ -61,6 +61,19 @@ Live /report on Groq verified: ~26s, no 413, real page reads, 0 bad citations.
   burst of search_content). Caught live. Was killing the whole report.
 - 28 tests passing.
 
+### Product pass: friendly outside-in framing + improvement suggestions
+- Reframed prompts (EXPLORE_SYSTEM + SYNTHESIZE_INSTRUCTION): warm colleague
+  tone, OUTSIDE-IN delta (what a stranger takes away vs what the site intends —
+  the founder's blind spot = the value), kind about gaps.
+- NEW report field improvement_opportunities: list[ImprovementOpportunity]
+  (schemas.py). Each = observed (real experience) + suggestion (gentle "you
+  might consider…") + source_url. Kept a SEPARATE type/field from Observation so
+  opinion never contaminates cited fact (rules #2/#3 preserved). Defaults to []
+  so the model can honestly return none.
+- grounding.enforce_citations now verifies suggestion source_urls too — advice
+  pinned to a hallucinated page is dropped like a fabricated observation.
+- Live: warm tone confirmed, 3 grounded suggestions, 0 bad citations. 29 tests.
+
 ### Round 1 fixes:
 - read_page bare-slug bug (agent passed "home"/"pricing" as urls — every read
   silently failed; prompt now demands exact urls + tool recovers unambiguous slugs).
