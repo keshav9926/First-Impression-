@@ -103,6 +103,15 @@ Tests: 24 passing.
 ## IMMEDIATE NEXT STEP
 Phase 4 planning: multi-agent crew (researcher / user-sim / evaluator / skeptic) via LangGraph.
 
+## Thin-extraction guard (2026-07-15, after testing trynarrative.com)
+- JS-rendered (Framer) site: static crawl got 0.1% of homepage → report invented
+  false gaps ("no pricing" etc). Added extraction-ratio detection (aggregate OR
+  seed page < 1%) → chunk metadata flag → list_pages warns agent + scope_note
+  caveat appended in code. 34 tests. Store currently holds trynarrative (18
+  chunks, flagged thin) — re-ingest vortexify before demoing rich reports.
+- REAL CURE (deferred): headless rendering via Playwright for JS sites.
+- LESSON: one-site eval at 100% masked an entire failure class.
+
 ## Then: Phase 4+
 - P4: multi-agent crew (researcher / user-sim / evaluator / skeptic) via LangGraph.
 - P5: evals + guardrails (groundedness LLM-judge + RAGAS, prompt-injection filter).

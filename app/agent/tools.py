@@ -46,11 +46,26 @@ SEARCH_NEAR_MISS_MARGIN = 0.10
 
 
 def _list_pages() -> str:
-    """Observation for list_pages(): the distinct pages available to analyze."""
-    urls = sorted({c["url"] for c in store.all_chunks()})
+    """Observation for list_pages(): the distinct pages available to analyze.
+
+    If ingestion flagged thin extraction (JS-rendered site — static crawl saw
+    only a fraction of the real content), the agent is warned HERE, on its
+    very first tool call, so it never converts our blindness into confident
+    "the site doesn't mention X" findings."""
+    chunks = store.all_chunks()
+    urls = sorted({c["url"] for c in chunks})
     if not urls:
         return "No pages have been ingested."
-    return "Pages available to analyze:\n" + "\n".join(f"- {u}" for u in urls)
+    warning = ""
+    if any(c.get("extraction_warning") for c in chunks):
+        warning = (
+            "WARNING: this site appears to be JavaScript-rendered — the crawler "
+            "captured only a small fraction of its real content. Content that "
+            "seems missing may simply be unread. Do NOT report 'the site does "
+            "not mention X' as a friction point or unanswered question; only "
+            "describe what you POSITIVELY observed.\n\n"
+        )
+    return warning + "Pages available to analyze:\n" + "\n".join(f"- {u}" for u in urls)
 
 
 def _read_page(url: str) -> str:

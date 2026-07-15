@@ -58,14 +58,29 @@ class Page:
     headings: list[str]
 
 
+# Below this text/HTML ratio the site is almost certainly JS-rendered (SPA /
+# Framer / Webflow): the HTML is a shell and the real content hydrates in the
+# browser, which a static fetch never sees. Server-rendered sites extract
+# 5-20%+; trynarrative.com (Framer) extracted 0.1%. 1% is a conservative line.
+THIN_EXTRACTION_RATIO = 0.01
+
+
 @dataclass
 class CrawlResult:
     """What crawl() hands back to the /ingest endpoint:
     the list of Pages plus a count of URLs robots.txt made us skip
-    (reported to the user in the API response)."""
+    (reported to the user in the API response).
+
+    extraction_ratio: total readable text ÷ total raw HTML across all fetched
+    pages. thin_extraction: True when that ratio is under THIN_EXTRACTION_RATIO
+    — the signal that this analysis is built on a FRACTION of the real site,
+    so "the site doesn't mention X" claims are unsafe (our blindness, not
+    their gap). Rides through chunk metadata to the agent + final report."""
 
     pages: list[Page]
     skipped_by_robots: int
+    extraction_ratio: float = 1.0
+    thin_extraction: bool = False
 
 
 class _LinkCollector(HTMLParser):
@@ -202,6 +217,9 @@ def crawl(start_url: str, max_pages: int) -> CrawlResult:
     seen = {start_url}
     pages: list[Page] = []
     skipped_by_robots = 0
+    html_chars_total = 0  # raw HTML seen (denominator of extraction_ratio)
+    text_chars_total = 0  # readable text extracted (numerator)
+    seed_ratio: float | None = None  # the FIRST fetched page's own ratio
 
     headers = {"User-Agent": settings.crawler_user_agent}
     with httpx.Client(headers=headers, follow_redirects=True, timeout=15.0) as client:
@@ -232,6 +250,15 @@ def crawl(start_url: str, max_pages: int) -> CrawlResult:
             # we accept that — clean chunks matter more than complete ones.
             html = response.text
             text = trafilatura.extract(html, favor_precision=True) or ""
+            html_chars_total += len(html)
+            text_chars_total += len(text)
+            if seed_ratio is None and html:
+                # The seed (usually the homepage) is the page that carries the
+                # first impression — and on JS-rendered sites it's exactly the
+                # page whose content hydrates in the browser. Big static legal
+                # pages (privacy/terms) can mask that in the aggregate ratio,
+                # so the seed's own ratio is tracked as a separate signal.
+                seed_ratio = len(text) / len(html)
             if text.strip():
                 pages.append(Page(url=url, text=text, headings=_extract_headings(html)))
 
@@ -243,4 +270,17 @@ def crawl(start_url: str, max_pages: int) -> CrawlResult:
 
             time.sleep(settings.request_delay_seconds)  # politeness delay (rate limit)
 
-    return CrawlResult(pages=pages, skipped_by_robots=skipped_by_robots)
+    ratio = (text_chars_total / html_chars_total) if html_chars_total else 1.0
+    # Thin if EITHER signal trips: aggregate (whole crawl was thin) or seed
+    # (the homepage — the first-impression page — was thin, even when big
+    # static legal pages inflate the aggregate; seen live on trynarrative.com:
+    # homepage 0.001, aggregate 0.034 thanks to privacy/terms text).
+    thin = ratio < THIN_EXTRACTION_RATIO or (
+        seed_ratio is not None and seed_ratio < THIN_EXTRACTION_RATIO
+    )
+    return CrawlResult(
+        pages=pages,
+        skipped_by_robots=skipped_by_robots,
+        extraction_ratio=ratio,
+        thin_extraction=thin,
+    )

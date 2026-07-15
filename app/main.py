@@ -120,8 +120,16 @@ def ingest(request: IngestRequest) -> IngestResponse:
     # Page texts -> chunks, each remembering which page it came from (for
     # citations) and the page's section headings (for the agent's read_page
     # section map — Chroma metadata must be scalar, so the list is joined).
+    # extraction_warning rides on every chunk (site-level fact, chunk-level
+    # storage) so the report agent — which only sees the store — knows the
+    # analysis may rest on a fraction of the real site.
     chunks = [
-        {"text": piece, "url": page.url, "headings": " · ".join(page.headings)}
+        {
+            "text": piece,
+            "url": page.url,
+            "headings": " · ".join(page.headings),
+            "extraction_warning": result.thin_extraction,
+        }
         for page in result.pages
         for piece in chunk_text(page.text)
     ]
@@ -142,6 +150,7 @@ def ingest(request: IngestRequest) -> IngestResponse:
         pages_fetched=len(result.pages),
         chunks_stored=stored,
         skipped_by_robots=result.skipped_by_robots,
+        extraction_warning=result.thin_extraction,
     )
 
 

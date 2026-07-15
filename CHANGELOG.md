@@ -4,6 +4,12 @@ Reverse order (newest first). For learning + interview recall.
 
 ## Phase 3 — ReAct report agent
 
+**(next) — thin-extraction guard (JS-rendered sites)**
+- BROKE (found by testing a SECOND site — trynarrative.com, Framer): static crawl extracted 0.1% of the homepage (368 chars from 388K of HTML). Report then confidently claimed "no pricing / no getting-started / no integrations" — OUR blindness reported as the FOUNDER'S gap. Worst possible failure for this product.
+- FIX: crawl computes text/HTML extraction ratio; thin if aggregate < 1% OR the SEED page < 1% (aggregate alone was fooled: big static legal pages diluted it to 3.4% while the homepage sat at 0.1%).
+- Flag rides chunk metadata → list_pages warns the agent on its FIRST call ("do not report absence as a gap") → scope_note gets a hard caveat appended IN CODE (not trusted to the LLM). IngestResponse exposes extraction_warning.
+- LESSON: single-site eval at 100% was blind to an entire failure class. One diverse site surfaced it instantly. Real cure = headless rendering (Playwright) — deferred, documented.
+
 **1634c31 — heading-aware section map (coverage)**
 - GAP (found by user pushing on the design): read_page truncates a long page at 4000 chars → agent blind past the cut, can't search for sections it never learned EXIST (unknown-unknown). Docs page = 44K chars.
 - FIX: parse h1–h3 from raw HTML (`_HeadingCollector`, same HTMLParser trick as `_LinkCollector`). Headings ride as chunk metadata. read_page prepends "Sections on this page: …" (~150 tokens) ONLY when truncating (short pages pay nothing).

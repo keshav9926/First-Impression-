@@ -37,6 +37,11 @@ class IngestResponse(BaseModel):
     pages_fetched: int
     chunks_stored: int
     skipped_by_robots: int
+    # True when the site's text/HTML ratio says it is JS-rendered (SPA/Framer/
+    # Webflow) and a static crawl captured only a fraction of the real content.
+    # The caller should treat any downstream "the site doesn't mention X" with
+    # suspicion — it may be OUR blindness, not the site's gap.
+    extraction_warning: bool = False
 
 
 class AskRequest(BaseModel):

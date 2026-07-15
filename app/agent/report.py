@@ -92,6 +92,19 @@ def generate_report() -> tuple[FirstImpressionReport, list[dict], list[str]]:
     else:
         report, steps_log, pages_examined = _generate_gemini()
 
-    valid_urls = sorted({c["url"] for c in store.all_chunks()})
+    all_chunks = store.all_chunks()
+    valid_urls = sorted({c["url"] for c in all_chunks})
     report, _dropped = grounding.enforce_citations(report, valid_urls)
+
+    # Thin-extraction caveat, appended IN CODE (not trusted to the LLM): if the
+    # crawl captured only a fraction of a JS-rendered site, every reader of
+    # this report must see that "not found" may mean "not read".
+    if any(c.get("extraction_warning") for c in all_chunks):
+        report.scope_note = (
+            report.scope_note.rstrip(".")
+            + ". IMPORTANT: this site appears to be JavaScript-rendered and the "
+            "crawler captured only a small fraction of its content — statements "
+            "about missing or unaddressed topics may reflect the crawler's "
+            "limitation, not the site."
+        )
     return report, steps_log, pages_examined

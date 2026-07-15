@@ -53,6 +53,22 @@ def test_read_page_unknown_url_lists_whats_available(monkeypatch):
     assert "https://acme.com/pricing" in out  # helps the model recover
 
 
+def test_list_pages_warns_on_thin_extraction(monkeypatch):
+    # JS-rendered site → flag on chunks → the agent's FIRST observation warns
+    # it not to convert crawler blindness into "the site doesn't mention X".
+    flagged = [{**c, "extraction_warning": True} for c in FAKE_CHUNKS]
+    monkeypatch.setattr(tools.store, "all_chunks", lambda: flagged)
+    out = tools.execute_tool("list_pages", {})
+    assert "WARNING" in out and "JavaScript-rendered" in out
+    assert "https://acme.com/pricing" in out  # pages still listed
+
+
+def test_list_pages_no_warning_on_normal_site(monkeypatch):
+    monkeypatch.setattr(tools.store, "all_chunks", lambda: FAKE_CHUNKS)
+    out = tools.execute_tool("list_pages", {})
+    assert "WARNING" not in out
+
+
 def test_read_page_truncation_shows_section_map(monkeypatch):
     # A long page gets cut at READ_PAGE_MAX_CHARS — the section map must reveal
     # what exists beyond the cut so the model can search into it.
