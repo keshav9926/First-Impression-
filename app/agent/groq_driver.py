@@ -25,14 +25,13 @@ from google import genai
 from google.genai import types as genai_types
 
 from app.agent import prompts, tools
+from app.agent.llm import generate_with_retry
 from app.config import settings
 from app.schemas import FirstImpressionReport
 
 _MAX_RATE_RETRIES = 6
-# Groq free tier is ~12K tokens/minute, and the whole history is resent each
-# step. Cap at 5 to match the Gemini driver's MAX_STEPS (list_pages + read
-# key pages + 1-2 targeted searches is sufficient for most startup sites).
-_GROQ_MAX_STEPS = 5
+# Step cap lives in config (settings.agent_max_steps) — ONE value shared with
+# the Gemini driver so the two can never drift apart.
 
 
 def _retry_after_seconds(exc: groq.RateLimitError) -> float:
@@ -75,8 +74,9 @@ def generate() -> tuple[FirstImpressionReport, list[dict], list[str]]:
         {"role": "user", "content": "Analyze this company's public site and prepare its report."},
     ]
     steps_log: list[dict] = []
+    seen_calls: set = set()  # repeat-call guard (see tools.repeat_call_reminder)
 
-    for _ in range(_GROQ_MAX_STEPS):
+    for _ in range(settings.agent_max_steps):
         response = _complete(
             groq_client, messages=messages, tools=tools.OPENAI_TOOLS, tool_choice="auto"
         )
@@ -105,8 +105,15 @@ def generate() -> tuple[FirstImpressionReport, list[dict], list[str]]:
 
         # Execute each call; return one tool message per call.
         for tc in message.tool_calls:
-            args = json.loads(tc.function.arguments) if tc.function.arguments else {}
-            observation = tools.execute_tool(tc.function.name, args)
+            # `or {}` twice: arguments may be "" (falsy) OR the string "null"
+            # (json.loads → None) — both must become an empty dict, or
+            # args.get(...) in execute_tool would crash on None.
+            args = (json.loads(tc.function.arguments) if tc.function.arguments else {}) or {}
+            # Repeat-call guard: identical (tool, args) → short reminder
+            # instead of re-executing (result already in history).
+            observation = tools.repeat_call_reminder(
+                tc.function.name, args, seen_calls
+            ) or tools.execute_tool(tc.function.name, args)
             steps_log.append({"tool": tc.function.name, "args": args})
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": observation})
 
@@ -140,16 +147,24 @@ def generate() -> tuple[FirstImpressionReport, list[dict], list[str]]:
         + "\n\n"
         + prompts.SYNTHESIZE_INSTRUCTION
     )
-    synthesis_response = gemini_client.models.generate_content(
-        model=settings.gemini_agent_model,
-        contents=synthesis_prompt,
-        config=genai_types.GenerateContentConfig(
+    # generate_with_retry: the whole exploration is already paid for by the
+    # time we get here — a transient Gemini free-tier 429 must not throw all
+    # of that work away when waiting a few seconds would save it.
+    synthesis_response = generate_with_retry(
+        gemini_client,
+        settings.gemini_agent_model,
+        synthesis_prompt,
+        genai_types.GenerateContentConfig(
             system_instruction=prompts.EXPLORE_SYSTEM,
             response_mime_type="application/json",
             response_schema=FirstImpressionReport,
         ),
     )
-    report: FirstImpressionReport = synthesis_response.parsed
+    report: FirstImpressionReport | None = synthesis_response.parsed
+    if report is None:
+        # Schema-constrained output failed to parse (safety block / malformed
+        # JSON) — fail with a clear message, not an AttributeError downstream.
+        raise ValueError("Synthesis returned no parseable report — retry the request.")
 
     pages_examined = sorted(
         {s["args"]["url"] for s in steps_log if s["tool"] == "read_page" and "url" in s["args"]}

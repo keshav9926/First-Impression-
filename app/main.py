@@ -33,6 +33,7 @@ import logging
 import groq
 import voyageai.error
 from fastapi import FastAPI, HTTPException
+from google.genai import errors as genai_errors
 
 from app.agent.report import generate_report
 from app.config import settings
@@ -260,6 +261,20 @@ def report() -> ReportResponse:
             status_code=429,
             detail="Groq rate limit hit during analysis — wait a minute and retry.",
         )
+    except genai_errors.ClientError as exc:
+        # Gemini quota exhausted despite generate_with_retry (a truly spent
+        # DAILY quota looks like endless 429s). Other client errors are real
+        # bugs — let those surface as 500s.
+        if getattr(exc, "code", None) != 429:
+            raise
+        raise HTTPException(
+            status_code=429,
+            detail="Gemini rate limit hit during analysis — the free daily "
+            "quota may be exhausted; retry later.",
+        )
+    except ValueError as exc:
+        # The synthesis call returned no parseable report (see agent drivers).
+        raise HTTPException(status_code=502, detail=str(exc))
 
     tool_calls = [f"{s['tool']}({s['args']})" for s in steps_log]
     return ReportResponse(

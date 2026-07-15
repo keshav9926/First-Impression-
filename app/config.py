@@ -65,6 +65,12 @@ class Settings(BaseSettings):
     # style) behind this switch.
     agent_provider: str = "gemini"
 
+    # Hard cap on the agent's explore loop, shared by BOTH drivers (react.py
+    # and groq_driver.py) so the two can never drift apart. 5 is enough for
+    # list_pages + read key pages + 1-2 targeted searches, and keeps the
+    # resent-history token burst inside Groq's ~12K tokens/minute free tier.
+    agent_max_steps: int = 5
+
     # --- Embeddings (Voyage AI) — used by embeddings.py ---
     voyage_api_key: str = ""
     embedding_model: str = "voyage-3.5"

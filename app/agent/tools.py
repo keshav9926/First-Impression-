@@ -19,6 +19,7 @@
 # FUNCTION_DECLARATIONS is the schema list handed to Gemini so it knows what
 # tools exist and how to call them (name, description, parameters).
 
+import json
 from urllib.parse import urlparse
 
 from google.genai import types
@@ -101,6 +102,31 @@ def _search_content(query: str) -> str:
         f"[relevance {h['relevance']:.2f}] (from {h['url']})\n{h['text'][:SEARCH_SNIPPET_CHARS]}"
         for h in relevant
     )
+
+
+# --- Repeat-call guard, shared by both drivers (react.py + groq_driver.py) ---
+# The store is frozen during a run and every tool is deterministic, so calling
+# the same tool with the same args twice can only waste a step and re-add the
+# same tokens to the resent history. Instead of re-executing, the agent gets a
+# short reminder — the original observation is already in its history.
+
+def repeat_call_reminder(name: str, args: dict, seen: set) -> str | None:
+    """Return a reminder string if (name, args) was already executed this run,
+    else record it in `seen` and return None (meaning: go ahead and execute).
+
+    Called by: react.py loop and groq_driver.py loop, before execute_tool().
+    `seen` is created fresh per run by the caller — module state would leak
+    between requests.
+    """
+    key = (name, json.dumps(args, sort_keys=True))
+    if key in seen:
+        return (
+            f"You already called {name} with these exact arguments — the result "
+            "is unchanged and already in your context. Call a DIFFERENT tool or "
+            "different arguments, or stop and write the report."
+        )
+    seen.add(key)
+    return None
 
 
 # --- Dispatcher: map a model-chosen tool name + args to the right impl ---

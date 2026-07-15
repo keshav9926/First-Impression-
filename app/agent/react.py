@@ -49,6 +49,7 @@ def run_react_loop(
         {"tool": name, "args": {...}} in the order the agent acted.
     """
     steps_log: list[dict] = []
+    seen_calls: set = set()  # repeat-call guard (see tools.repeat_call_reminder)
 
     for _ in range(max_steps):
         response = generate_with_retry(client, model, contents, config)
@@ -74,7 +75,11 @@ def run_react_loop(
         response_parts = []
         for fc in function_calls:
             args = dict(fc.args) if fc.args else {}
-            observation = tools.execute_tool(fc.name, args)
+            # Repeat-call guard: identical (tool, args) → short reminder
+            # instead of re-executing (result already in history).
+            observation = tools.repeat_call_reminder(
+                fc.name, args, seen_calls
+            ) or tools.execute_tool(fc.name, args)
             steps_log.append({"tool": fc.name, "args": args})
             response_parts.append(
                 types.Part.from_function_response(

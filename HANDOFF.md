@@ -43,12 +43,23 @@ AI system: analyze a startup's PUBLIC site, output a cited "first impression" re
 - Gemini free: ~20 req/DAY on 2.5-flash → too small for agent; retry honors Retry-After (agent/llm.py).
 - Groq free: 12K tokens/MINUTE → bounded tool outputs (tools.py: READ_PAGE_MAX_CHARS 4000, SEARCH_TOP_K 3) + MAX_STEPS 5.
 
-## IMMEDIATE NEXT STEP (blocked here)
-Run the live /report on Groq and confirm it completes under the 12K tok/min limit:
-  uv run python  (call app.agent.report.generate_report) OR POST /report via /docs.
-Store has vortexify.ai (39 chunks) ingested. Expected: agent trace + structured report.
-- If it 413s (too many tokens): redesign = summarize-each-page-on-read (keep short notes, discard full text) instead of accumulating raw page text in history.
-- If it works: read the report critically (does it separate troubleshooting-docs from real friction? are unanswered_questions useful for the founder email?). Then Phase 4.
+## Phase 3 CLOSED (2026-07-15) — hardening done before Phase 4
+Live /report on Groq verified twice: ~30s, no 413, real page reads, useful report.
+Fixes landed:
+- read_page bare-slug bug (agent passed "home"/"pricing" as urls — every read
+  silently failed; prompt now demands exact urls + tool recovers unambiguous slugs).
+- Step cap unified → settings.agent_max_steps (was duplicated in prompts.py + groq_driver).
+- Repeat-call guard (tools.repeat_call_reminder) in BOTH drivers — identical
+  (tool, args) → reminder, no re-execution, no wasted tokens.
+- Phase B synthesis (groq_driver) now uses generate_with_retry — a Gemini 429
+  at the last step no longer throws away the whole exploration.
+- parsed=None guard in both drivers → ValueError → 502 with clear message.
+- /report maps Gemini 429 → HTTP 429 (was 500).
+- Groq arguments "null" edge (json.loads → None) → {} guard.
+Tests: 24 passing.
+
+## IMMEDIATE NEXT STEP
+Phase 4 planning: multi-agent crew (researcher / user-sim / evaluator / skeptic) via LangGraph.
 
 ## Then: Phase 4+
 - P4: multi-agent crew (researcher / user-sim / evaluator / skeptic) via LangGraph.

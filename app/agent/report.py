@@ -46,7 +46,7 @@ def _generate_gemini() -> tuple[FirstImpressionReport, list[dict], list[str]]:
         )
     ]
     contents, steps_log = run_react_loop(
-        client, settings.gemini_agent_model, contents, explore_config, prompts.MAX_STEPS
+        client, settings.gemini_agent_model, contents, explore_config, settings.agent_max_steps
     )
 
     # ---- Phase B: synthesize into the schema ----
@@ -63,7 +63,11 @@ def _generate_gemini() -> tuple[FirstImpressionReport, list[dict], list[str]]:
             response_schema=FirstImpressionReport,
         ),
     )
-    report: FirstImpressionReport = synthesis.parsed
+    report: FirstImpressionReport | None = synthesis.parsed
+    if report is None:
+        # Schema-constrained output failed to parse (safety block / malformed
+        # JSON) — fail with a clear message, not an AttributeError downstream.
+        raise ValueError("Synthesis returned no parseable report — retry the request.")
 
     pages_examined = sorted(
         {s["args"]["url"] for s in steps_log if s["tool"] == "read_page" and "url" in s["args"]}

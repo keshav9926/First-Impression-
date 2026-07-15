@@ -143,6 +143,41 @@ def test_loop_runs_tools_then_stops_on_text(monkeypatch):
     assert client.models.calls == 3  # two tool turns + the final text turn
 
 
+def test_repeat_call_reminder_blocks_second_identical_call():
+    seen: set = set()
+    # First call: allowed (returns None), recorded in `seen`.
+    assert tools.repeat_call_reminder("read_page", {"url": "https://a.com/"}, seen) is None
+    # Identical repeat: blocked with a reminder string.
+    out = tools.repeat_call_reminder("read_page", {"url": "https://a.com/"}, seen)
+    assert out is not None and "already called" in out
+    # Different args: allowed again.
+    assert tools.repeat_call_reminder("read_page", {"url": "https://b.com/"}, seen) is None
+
+
+def test_loop_reminds_instead_of_reexecuting_a_repeat(monkeypatch):
+    # The store must only be read ONCE for two identical read_page calls —
+    # the second gets the reminder, not a re-execution.
+    calls = {"n": 0}
+
+    def counting_chunks():
+        calls["n"] += 1
+        return FAKE_CHUNKS
+
+    monkeypatch.setattr(tools.store, "all_chunks", counting_chunks)
+    client = _FakeClient(
+        [
+            _tool_call_response("read_page", {"url": "https://acme.com/"}),
+            _tool_call_response("read_page", {"url": "https://acme.com/"}),  # repeat
+            _text_response("done"),
+        ]
+    )
+    contents, steps_log = react.run_react_loop(
+        client, model="fake", contents=[], config=None, max_steps=10
+    )
+    assert calls["n"] == 1  # second call never hit the store
+    assert len(steps_log) == 2  # both attempts logged for transparency
+
+
 def test_loop_respects_max_steps(monkeypatch):
     monkeypatch.setattr(tools.store, "all_chunks", lambda: FAKE_CHUNKS)
     # A model that NEVER stops calling tools must still be bounded.
