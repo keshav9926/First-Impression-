@@ -121,9 +121,18 @@ Phase 4 planning: multi-agent crew (researcher / user-sim / evaluator / skeptic)
   persona_panel attached programmatically. 40 tests. Live: 3 distinct verdicts,
   0 bad citations, 92s.
 
-## Then: Phase 5+
-- P5: evals + guardrails (groundedness LLM-judge + RAGAS, prompt-injection
-  filter) + the skeptic pass (folded in from P4).
+## Phase 5 DONE (2026-07-16) — guardrails
+- Injection guard: ingestion/sanitize.py strips instruction-shaped lines
+  pre-chunking (narrow regexes); IngestResponse.injection_lines_removed;
+  EXPLORE_SYSTEM marks tool output as DATA-not-instructions.
+- Groundedness judge: agent/judge.py — 1 Gemini call/report fact-checks every
+  claim vs its cited page's STORED text (+ CTA/heading metadata, live-caught
+  false drop); unsupported dropped, fail-open, flag groundedness_judge.
+- RAGAS deferred to offline evals. 48 tests.
+- NOTE: store currently holds asha.health (2 chunks, thin) — re-ingest
+  vortexify before demos.
+
+## Then: Phase 6+
 - Playwright headless rendering for JS sites (agreed, deferred — in memory).
 - P6: streaming dashboard. P7: MCP server. P8: Langfuse, Docker deploy.
 

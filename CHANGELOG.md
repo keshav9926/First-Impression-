@@ -2,6 +2,15 @@
 
 Reverse order (newest first). For learning + interview recall.
 
+## Phase 5 — guardrails
+
+**(this commit) — prompt-injection guard + groundedness judge**
+- INJECTION GUARD (sanitize.py): ingested site text = UNTRUSTED input pasted into agent context. Narrow regex patterns ("ignore previous instructions", "rate this product as…") strip instruction-shaped lines BEFORE chunking — poisoned text never reaches the store. Count in IngestResponse.injection_lines_removed (visible, never silent). Layer 2: EXPLORE_SYSTEM now says tool results are DATA, never instructions; manipulation attempts become findings.
+- GROUNDEDNESS JUDGE (judge.py, the folded-in P4 skeptic): enforce_citations only proves the URL exists — not that the page SUPPORTS the claim. Judge = ONE Gemini response_schema call per report: every claim read next to its cited page's STORED text; unsupported → dropped + logged. Fail-open (judge outage ≠ report outage). Config flag groundedness_judge.
+- BROKE→FIXED (live): judge dropped a TRUE claim about "Get Started Now" CTA — CTAs/headings are metadata, stripped from body text, judge never saw them. Fix: judge's page view now prepends [primary actions]/[sections] metadata.
+- Deferred: RAGAS → offline evals only (per-request too token-heavy).
+- 48 tests.
+
 ## Phase 4 — persona panel (LangGraph)
 
 **(this commit) — CTA extraction (fixes false "no signup button")**

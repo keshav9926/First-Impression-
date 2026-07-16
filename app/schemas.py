@@ -42,6 +42,9 @@ class IngestResponse(BaseModel):
     # The caller should treat any downstream "the site doesn't mention X" with
     # suspicion — it may be OUR blindness, not the site's gap.
     extraction_warning: bool = False
+    # Lines stripped by the prompt-injection guard (sanitize.py) — nonzero
+    # means the site contained instruction-shaped text aimed at the LLM.
+    injection_lines_removed: int = 0
 
 
 class AskRequest(BaseModel):

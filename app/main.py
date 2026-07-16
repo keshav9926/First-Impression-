@@ -40,6 +40,7 @@ from app.config import settings
 from app.ingestion.chunker import chunk_text
 from app.ingestion.fetcher import crawl
 from app.ingestion.robots import is_allowed
+from app.ingestion.sanitize import sanitize_text
 from app.rag import embeddings, pipeline, qa, store
 from app.schemas import (
     AskRequest,
@@ -117,6 +118,16 @@ def ingest(request: IngestRequest) -> IngestResponse:
     if not result.pages:
         raise HTTPException(status_code=404, detail="No readable pages found at this URL.")
 
+    # Prompt-injection guard (Phase 5): strip instruction-shaped lines from
+    # untrusted page text BEFORE chunking — poisoned lines never reach the
+    # store. Count surfaces in the response (visible, never silent).
+    injection_lines_removed = 0
+    sanitized_pages = []
+    for page in result.pages:
+        clean, removed = sanitize_text(page.text)
+        injection_lines_removed += len(removed)
+        sanitized_pages.append((page, clean))
+
     # Page texts -> chunks, each remembering which page it came from (for
     # citations) and the page's section headings (for the agent's read_page
     # section map — Chroma metadata must be scalar, so the list is joined).
@@ -131,8 +142,8 @@ def ingest(request: IngestRequest) -> IngestResponse:
             "ctas": " · ".join(page.ctas),  # primary signup/demo/login actions
             "extraction_warning": result.thin_extraction,
         }
-        for page in result.pages
-        for piece in chunk_text(page.text)
+        for page, clean in sanitized_pages
+        for piece in chunk_text(clean)
     ]
 
     try:
@@ -152,6 +163,7 @@ def ingest(request: IngestRequest) -> IngestResponse:
         chunks_stored=stored,
         skipped_by_robots=result.skipped_by_robots,
         extraction_warning=result.thin_extraction,
+        injection_lines_removed=injection_lines_removed,
     )
 
 

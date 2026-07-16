@@ -21,7 +21,7 @@
 from google import genai
 from google.genai import types
 
-from app.agent import grounding, groq_driver, prompts, tools
+from app.agent import grounding, groq_driver, judge, prompts, tools
 from app.agent.llm import generate_with_retry
 from app.agent.react import run_react_loop
 from app.config import settings
@@ -84,10 +84,13 @@ def apply_guards(report: FirstImpressionReport) -> FirstImpressionReport:
     - thin-extraction caveat appended IN CODE (not trusted to the LLM): if the
       crawl captured only a fraction of a JS-rendered site, every reader must
       see that "not found" may mean "not read".
+    - groundedness judge (Phase 5): one LLM pass that drops claims the cited
+      page does not actually support (citations only prove the URL exists).
     """
     all_chunks = store.all_chunks()
     valid_urls = sorted({c["url"] for c in all_chunks})
     report, _dropped = grounding.enforce_citations(report, valid_urls)
+    report = judge.verify_groundedness(report)
 
     if any(c.get("extraction_warning") for c in all_chunks):
         report.scope_note = (

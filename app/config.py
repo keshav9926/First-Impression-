@@ -71,6 +71,12 @@ class Settings(BaseSettings):
     # resent-history token burst inside Groq's ~12K tokens/minute free tier.
     agent_max_steps: int = 5
 
+    # Phase 5: one extra Gemini call per report that fact-checks every claim
+    # against its cited page's stored text; unsupported claims are dropped.
+    # Fail-open on judge errors. Disable to save the call (or when Gemini
+    # daily quota is exhausted).
+    groundedness_judge: bool = True
+
     # --- Embeddings (Voyage AI) — used by embeddings.py ---
     voyage_api_key: str = ""
     embedding_model: str = "voyage-3.5"
