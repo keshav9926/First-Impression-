@@ -58,6 +58,13 @@ class Settings(BaseSettings):
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"  # tool-calling capable
 
+    # --- LLM (Cerebras) — second free provider in agent/llm_pool.py ---
+    # Free key from https://cloud.cerebras.ai. Groq's 100K tokens/DAY can't fit
+    # 20 reports; the pool prefers Groq for explore, Cerebras for persona/judge
+    # JSON verdicts, and fails over across the two on daily-quota 429s.
+    cerebras_api_key: str = ""
+    cerebras_model: str = "zai-glm-4.7"  # tool-calling + JSON mode verified
+
     # --- Which LLM runs the /report agent: "gemini" or "groq" ---
     # Separate from llm_provider (which drives /ask) because the agent is a
     # high-volume workload with different rate-limit economics. The tool-calling

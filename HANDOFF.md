@@ -151,6 +151,13 @@ Phase 4 planning: multi-agent crew (researcher / user-sim / evaluator / skeptic)
   → report). GET / serves it. 52 tests. Run: uv run uvicorn app.main:app then
   open http://127.0.0.1:8000/ . Live browser run pending Groq token reset.
 
+## Dual-provider pool DONE (2026-07-16) — 20 reports/day
+- agent/llm_pool.py: chat() over Groq+Cerebras (OpenAI dialect). Explore→groq,
+  personas+judge→cerebras (zai-glm-4.7, JSON mode), synthesis→Gemini (1 call/
+  report ≈ 20/day). Daily-429 → instant failover; minute-429 → Retry-After.
+- CEREBRAS_API_KEY in .env. Live-proven under exhausted Groq TPD. 54 tests.
+- Store may hold example.com (SSE smoke side-effect) — re-ingest before use.
+
 ## Then: next
 - P8 deploy: Docker + `playwright install-deps chromium` in image; host → live URL.
 - P7 MCP server. Token levers (steps 5→3, compress evidence, cache). Async is

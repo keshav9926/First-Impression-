@@ -53,22 +53,22 @@ def _report():
     )
 
 
-def _fake_verdicts(payload):
-    class R:
-        parsed = payload
+def _fake_message(content: str):
+    class M:
+        pass
 
-    return R()
+    m = M()
+    m.content = content
+    return m
 
 
 def test_judge_drops_unsupported_claims(monkeypatch):
     monkeypatch.setattr(judge.store, "all_chunks", lambda: [
         {"url": "https://a.com/", "text": "Acme sells widgets."}
     ])
-    verdicts = judge._Verdicts(verdicts=[
-        judge.ClaimVerdict(index=0, supported=True, reason="stated"),
-        judge.ClaimVerdict(index=1, supported=False, reason="never mentioned"),
-    ])
-    monkeypatch.setattr(judge, "generate_with_retry", lambda *a, **k: _fake_verdicts(verdicts))
+    payload = ('{"verdicts": [{"index": 0, "supported": true, "reason": "stated"},'
+               ' {"index": 1, "supported": false, "reason": "never mentioned"}]}')
+    monkeypatch.setattr(judge.llm_pool, "chat", lambda *a, **k: _fake_message(payload))
 
     out = judge.verify_groundedness(_report())
     claims = [o.claim for o in out.what_the_product_is]
@@ -83,7 +83,7 @@ def test_judge_fails_open_on_error(monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("quota dead")
 
-    monkeypatch.setattr(judge, "generate_with_retry", boom)
+    monkeypatch.setattr(judge.llm_pool, "chat", boom)
     out = judge.verify_groundedness(_report())
     assert len(out.what_the_product_is) == 2  # untouched, shipped with warning
 
@@ -91,6 +91,82 @@ def test_judge_fails_open_on_error(monkeypatch):
 def test_judge_disabled_by_flag(monkeypatch):
     monkeypatch.setattr(judge.settings, "groundedness_judge", False)
     called = {"n": 0}
-    monkeypatch.setattr(judge, "generate_with_retry", lambda *a, **k: called.__setitem__("n", 1))
+    monkeypatch.setattr(judge.llm_pool, "chat", lambda *a, **k: called.__setitem__("n", 1))
     out = judge.verify_groundedness(_report())
     assert called["n"] == 0 and len(out.what_the_product_is) == 2
+
+
+# ----- llm_pool.py: cross-provider failover -----
+
+
+def test_pool_fails_over_on_daily_quota(monkeypatch):
+    import groq as groq_sdk
+    import httpx
+
+    from app.agent import llm_pool
+
+    fake_response = httpx.Response(
+        429, request=httpx.Request("POST", "http://groq.test"), headers={}
+    )
+
+    class FakeMsg:
+        content = "ok"
+
+    class FakeResp:
+        choices = [type("C", (), {"message": FakeMsg()})()]
+
+    calls = []
+
+    class FakeGroq:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**k):
+                    calls.append("groq")
+                    raise groq_sdk.RateLimitError(
+                        "tokens per day (TPD): Limit 100000",
+                        response=fake_response,
+                        body=None,
+                    )
+
+    class FakeCerebras:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**k):
+                    calls.append("cerebras")
+                    return FakeResp()
+
+    monkeypatch.setattr(llm_pool.settings, "groq_api_key", "k1")
+    monkeypatch.setattr(llm_pool.settings, "cerebras_api_key", "k2")
+    monkeypatch.setattr(
+        llm_pool, "_client", lambda p: FakeGroq() if p == "groq" else FakeCerebras()
+    )
+
+    msg = llm_pool.chat([{"role": "user", "content": "hi"}], prefer="groq")
+    assert msg.content == "ok"
+    assert calls == ["groq", "cerebras"]  # daily 429 → instant failover
+
+
+def test_pool_skips_providers_without_keys(monkeypatch):
+    from app.agent import llm_pool
+
+    class FakeMsg:
+        content = "ok"
+
+    class FakeResp:
+        choices = [type("C", (), {"message": FakeMsg()})()]
+
+    class FakeCerebras:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**k):
+                    return FakeResp()
+
+    monkeypatch.setattr(llm_pool.settings, "groq_api_key", "")  # no groq key
+    monkeypatch.setattr(llm_pool.settings, "cerebras_api_key", "k2")
+    monkeypatch.setattr(llm_pool, "_client", lambda p: FakeCerebras())
+
+    msg = llm_pool.chat([{"role": "user", "content": "hi"}], prefer="groq")
+    assert msg.content == "ok"  # went straight to cerebras

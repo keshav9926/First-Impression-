@@ -17,69 +17,18 @@
 #   report.py generate_report() → generate()   (when agent_provider == "groq")
 
 import json
-import re
-import time
 
-import groq
 from google import genai
 from google.genai import types as genai_types
 
 from app import events
-from app.agent import prompts, tools
+from app.agent import llm_pool, prompts, tools
 from app.agent.llm import generate_with_retry
 from app.config import settings
 from app.schemas import FirstImpressionReport
 
-_MAX_RATE_RETRIES = 6
-# Llama occasionally emits malformed tool-call syntax that Groq rejects with a
-# 400 "tool_use_failed" — a STOCHASTIC generation glitch, not a bug in our
-# request. Groq samples with temperature, so simply re-asking usually produces
-# valid syntax. Retry a few times before giving up.
-_MAX_TOOL_FORMAT_RETRIES = 3
-# Step cap lives in config (settings.agent_max_steps) — ONE value shared with
-# the Gemini driver so the two can never drift apart.
-
-
-def _is_tool_format_error(exc: groq.BadRequestError) -> bool:
-    """True for the transient 'tool_use_failed' 400 (retriable), False for any
-    other 400 (a real bad request — must NOT be retried, that would just mask a
-    genuine bug behind three identical failures)."""
-    return "tool_use_failed" in str(exc)
-
-
-def _retry_after_seconds(exc: groq.RateLimitError) -> float:
-    """Groq returns a Retry-After header and/or 'try again in 1.2s' text."""
-    header = exc.response.headers.get("retry-after") if exc.response is not None else None
-    if header:
-        try:
-            return float(header) + 0.5
-        except ValueError:
-            pass
-    match = re.search(r"try again in ([0-9.]+)s", str(exc))
-    return float(match.group(1)) + 0.5 if match else 2.0
-
-
-def _complete(client: groq.Groq, **kwargs):
-    """chat.completions.create, retrying two distinct transient failures:
-      - 429 rate limits (honor Retry-After),
-      - 400 'tool_use_failed' (Llama emitted malformed tool-call syntax).
-    Any other error propagates immediately — a real bug shouldn't be retried.
-    """
-    rate_attempts = 0
-    format_attempts = 0
-    while True:
-        try:
-            return client.chat.completions.create(model=settings.groq_model, **kwargs)
-        except groq.RateLimitError as exc:
-            rate_attempts += 1
-            if rate_attempts >= _MAX_RATE_RETRIES:
-                raise
-            time.sleep(min(_retry_after_seconds(exc), 60))
-        except groq.BadRequestError as exc:
-            format_attempts += 1
-            if not _is_tool_format_error(exc) or format_attempts >= _MAX_TOOL_FORMAT_RETRIES:
-                raise
-            # No sleep: it's a sampling glitch, not a rate issue — just re-ask.
+# Retry/failover machinery lives in llm_pool.chat() — one place for both
+# providers (Groq + Cerebras). Step cap lives in settings.agent_max_steps.
 
 
 def explore() -> tuple[list, list[dict]]:
@@ -87,8 +36,8 @@ def explore() -> tuple[list, list[dict]]:
 
     Called by: generate() below AND agent/panel.py (Phase 4) — the panel
     reuses this exact exploration so evidence is gathered ONCE per report.
+    Runs on llm_pool (prefer Groq, fail over to Cerebras on daily quota).
     """
-    groq_client = groq.Groq(api_key=settings.groq_api_key)
     messages: list = [
         {"role": "system", "content": prompts.EXPLORE_SYSTEM},
         {"role": "user", "content": "Analyze this company's public site and prepare its report."},
@@ -97,10 +46,9 @@ def explore() -> tuple[list, list[dict]]:
     seen_calls: set = set()  # repeat-call guard (see tools.repeat_call_reminder)
 
     for _ in range(settings.agent_max_steps):
-        response = _complete(
-            groq_client, messages=messages, tools=tools.OPENAI_TOOLS, tool_choice="auto"
+        message = llm_pool.chat(
+            messages, prefer="groq", tools=tools.OPENAI_TOOLS, tool_choice="auto"
         )
-        message = response.choices[0].message
 
         if not message.tool_calls:
             # Model produced text instead of a tool call = done exploring.

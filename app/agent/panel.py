@@ -25,12 +25,10 @@ import json
 import operator
 from typing import Annotated, TypedDict
 
-import groq
 import pydantic
 
 from app import events
-from app.agent import groq_driver, personas
-from app.config import settings
+from app.agent import groq_driver, llm_pool, personas
 from app.schemas import FirstImpressionReport, PersonaImpression
 
 _PERSONA_RETRIES = 2  # JSON-mode replies occasionally malformed — one re-ask
@@ -54,23 +52,21 @@ def _explore_node(state: PanelState) -> dict:
 
 
 def _judge_as(persona: dict, evidence: str) -> PersonaImpression:
-    """One persona's verdict over the shared evidence: Groq JSON mode reply,
+    """One persona's verdict over the shared evidence: JSON-mode reply via the
+    provider pool (prefer CEREBRAS — keeps Groq's daily budget for explore),
     validated into PersonaImpression (retried once on malformed JSON)."""
-    client = groq.Groq(api_key=settings.groq_api_key)
     last_error: Exception = ValueError("no attempt made")
     for _ in range(_PERSONA_RETRIES):
-        response = groq_driver._complete(
-            client,
-            messages=[
+        message = llm_pool.chat(
+            [
                 {"role": "system", "content": personas.persona_system_prompt(persona)},
                 {"role": "user", "content": f"EVIDENCE:\n\n{evidence}"},
             ],
+            prefer="cerebras",
             response_format={"type": "json_object"},
         )
         try:
-            return PersonaImpression.model_validate(
-                json.loads(response.choices[0].message.content or "")
-            )
+            return PersonaImpression.model_validate(json.loads(message.content or ""))
         except (json.JSONDecodeError, pydantic.ValidationError) as exc:
             last_error = exc  # malformed reply — re-ask (sampling glitch)
     raise ValueError(f"Persona {persona['key']} returned unusable JSON: {last_error}")

@@ -8,9 +8,9 @@
 # Unsupported observations are DROPPED (accuracy over volume) and logged.
 #
 # DESIGN:
-# - ONE Gemini call per report (not per claim) — free-tier daily quota is the
-#   scarce resource; a single response_schema call judging all claims costs the
-#   same quota as judging one.
+# - ONE pooled LLM call per report (not per claim), prefer Cerebras JSON mode —
+#   Gemini's tiny daily quota is reserved for synthesis (llm_pool.py), and one
+#   call judging all claims costs the same quota as judging one.
 # - Page text comes from the STORE (the exact evidence the agent saw), capped
 #   per page so the judge prompt stays bounded.
 # - FAIL-OPEN: if the judge call itself dies (429/network), the report ships
@@ -21,12 +21,12 @@
 # CALL FLOW:
 #   report.apply_guards() → verify_groundedness(report)   (all report paths)
 
+import json
 import logging
 
 import pydantic
-from google import genai
 
-from app.agent.llm import generate_with_retry
+from app.agent import llm_pool
 from app.config import settings
 from app.rag import store
 from app.schemas import FirstImpressionReport
@@ -105,17 +105,21 @@ def verify_groundedness(report: FirstImpressionReport) -> FirstImpressionReport:
     prompt = f"{_JUDGE_INSTRUCTION}\n\nCLAIMS:\n{claims_block}\n\n{pages_block}"
 
     try:
-        response = generate_with_retry(
-            genai.Client(api_key=settings.gemini_api_key),
-            settings.gemini_agent_model,
-            prompt,
-            genai.types.GenerateContentConfig(
-                response_mime_type="application/json", response_schema=_Verdicts
-            ),
+        # Pool (prefer Cerebras) instead of Gemini: keeps Gemini's tiny daily
+        # quota exclusively for synthesis — 1 Gemini call per report ≈ 20/day.
+        message = llm_pool.chat(
+            [
+                {
+                    "role": "system",
+                    "content": 'Reply ONLY with JSON: {"verdicts": [{"index": int, '
+                    '"supported": bool, "reason": str}, ...]} — one entry per claim.',
+                },
+                {"role": "user", "content": prompt},
+            ],
+            prefer="cerebras",
+            response_format={"type": "json_object"},
         )
-        verdicts: _Verdicts | None = response.parsed
-        if verdicts is None:
-            raise ValueError("judge returned no parseable verdicts")
+        verdicts = _Verdicts.model_validate(json.loads(message.content or ""))
     except Exception as exc:  # fail-open: judge is a bonus layer, not a gate
         logger.warning("groundedness judge skipped (fail-open): %s", exc)
         return report

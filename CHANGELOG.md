@@ -2,6 +2,16 @@
 
 Reverse order (newest first). For learning + interview recall.
 
+## Scale — dual-provider pool (20 reports/day)
+
+**(this commit) — llm_pool: Groq + Cerebras failover; Gemini reserved for synthesis**
+- PROBLEM: 20 cold-outreach reports/day vs Groq 100K tokens/DAY (one testing day exhausted it) + Gemini ~20 req/day (each report was costing 2: synthesis + judge).
+- llm_pool.chat(): one call-site over both OpenAI-compatible providers. Minute-429 → sleep Retry-After; DAILY-429 (per day/TPD/RPD markers) → instant provider switch; tool_use_failed 400 → re-ask; connection error → other provider. Skips providers without keys.
+- Load split BY DESIGN: explore → prefer Groq; personas + judge → prefer Cerebras (JSON mode, zai-glm-4.7 — tool+JSON smoke-verified; free key had no llama). Synthesis stays Gemini response_schema = exactly 1 Gemini call/report ≈ 20 reports/day.
+- groq_driver's _complete/retry machinery deleted — lives once in the pool.
+- LIVE failover proof: ran full panel while Groq TPD was exhausted → explore fell to Cerebras, 44s, judge active. 54 tests.
+- Note: SSE smoke-test (example.com) had overwritten the store via a real background run — the stream works; re-ingest target before demos.
+
 ## Phase 6 — streaming dashboard
 
 **(this commit) — live SSE dashboard (Aether-style)**
