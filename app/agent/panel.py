@@ -29,6 +29,7 @@ import pydantic
 
 from app import events
 from app.agent import groq_driver, llm_pool, personas
+from app.config import settings
 from app.schemas import FirstImpressionReport, PersonaImpression
 
 _PERSONA_RETRIES = 2  # JSON-mode replies occasionally malformed — one re-ask
@@ -62,7 +63,7 @@ def _judge_as(persona: dict, evidence: str) -> PersonaImpression:
                 {"role": "system", "content": personas.persona_system_prompt(persona)},
                 {"role": "user", "content": f"EVIDENCE:\n\n{evidence}"},
             ],
-            prefer="cerebras",
+            prefer=settings.pool_prefer,
             response_format={"type": "json_object"},
         )
         try:

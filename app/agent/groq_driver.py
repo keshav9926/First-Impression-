@@ -47,7 +47,10 @@ def explore() -> tuple[list, list[dict]]:
 
     for _ in range(settings.agent_max_steps):
         message = llm_pool.chat(
-            messages, prefer="groq", tools=tools.OPENAI_TOOLS, tool_choice="auto"
+            messages,
+            prefer=settings.pool_prefer,
+            tools=tools.OPENAI_TOOLS,
+            tool_choice="auto",
         )
 
         if not message.tool_calls:
@@ -121,7 +124,6 @@ def synthesize(context: str, extra_context: str = "") -> FirstImpressionReport:
     generate_with_retry: the whole exploration is already paid for by now — a
     transient Gemini free-tier 429 must not throw that work away.
     """
-    gemini_client = genai.Client(api_key=settings.gemini_api_key)
     synthesis_prompt = (
         "Below is the raw exploration log from a ReAct agent that examined the "
         "company's public website using Groq.\n\n"
@@ -130,22 +132,44 @@ def synthesize(context: str, extra_context: str = "") -> FirstImpressionReport:
         + "\n\n"
         + prompts.SYNTHESIZE_INSTRUCTION
     )
-    synthesis_response = generate_with_retry(
-        gemini_client,
-        settings.gemini_agent_model,
-        synthesis_prompt,
-        genai_types.GenerateContentConfig(
-            system_instruction=prompts.EXPLORE_SYSTEM,
-            response_mime_type="application/json",
-            response_schema=FirstImpressionReport,
-        ),
+    synthesis_config = genai_types.GenerateContentConfig(
+        system_instruction=prompts.EXPLORE_SYSTEM,
+        response_mime_type="application/json",
+        response_schema=FirstImpressionReport,
     )
-    report: FirstImpressionReport | None = synthesis_response.parsed
-    if report is None:
+    # Synthesis chain of (api_key, model): Gemini 3 Flash on account 1, then
+    # account 2 (each ~20 RPD → ~40 premium syntheses/day combined). By choice
+    # there is NO lower-tier fallback: once both accounts' 3-flash quota is
+    # spent the report HARD-FAILS, so exhaustion is visible (add a 3rd key)
+    # rather than silently degrading synthesis quality. Transient 503s are still
+    # retried per candidate inside generate_with_retry.
+    k1, k2 = settings.gemini_api_key, settings.gemini_secondacc_api_key
+    candidates = [
+        (k1, settings.gemini_agent_model),   # 3-flash · account 1
+        (k2, settings.gemini_agent_model),   # 3-flash · account 2
+    ]
+    last_exc: Exception = RuntimeError("no Gemini key configured for synthesis")
+    for api_key, model in candidates:
+        if not api_key:
+            continue
+        try:
+            synthesis_response = generate_with_retry(
+                genai.Client(api_key=api_key), model, synthesis_prompt, synthesis_config
+            )
+            # Count this native (non-pool) Gemini call so get_usage() reflects
+            # total quota consumption — 1 request/report when healthy.
+            llm_pool.record(f"gemini-native:{model}")
+        except Exception as exc:  # exhausted retries on this candidate → next
+            llm_pool.record(f"gemini-native:{model}", "error")
+            last_exc = exc
+            continue
+        report: FirstImpressionReport | None = synthesis_response.parsed
+        if report is not None:
+            return report
         # Schema-constrained output failed to parse (safety block / malformed
-        # JSON) — fail with a clear message, not an AttributeError downstream.
-        raise ValueError("Synthesis returned no parseable report — retry the request.")
-    return report
+        # JSON) — try the next candidate rather than dying here.
+        last_exc = ValueError("Synthesis returned no parseable report — retry the request.")
+    raise last_exc
 
 
 def pages_from_steps(steps_log: list[dict]) -> list[str]:

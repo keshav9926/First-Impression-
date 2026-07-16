@@ -1,9 +1,25 @@
 # tests/test_guardrails.py — Phase 5: injection guard + groundedness judge.
 # No network: judge's Gemini call is monkeypatched.
 
-from app.agent import judge
+import pytest
+
+from app.agent import judge, llm_pool
 from app.ingestion.sanitize import sanitize_text
 from app.schemas import FirstImpressionReport, Observation
+
+
+@pytest.fixture(autouse=True)
+def _fresh_pool_state(monkeypatch):
+    """The circuit breaker + usage counters are module-global. Clear them before
+    each test so one test tripping a provider can't skip it in the next. Also
+    blank the two Gemini-account keys by default — they load from real .env
+    otherwise and would leak into the Groq/Cerebras failover assertions; tests
+    that exercise Gemini set them explicitly."""
+    llm_pool.reset_usage()
+    monkeypatch.setattr(llm_pool.settings, "gemini_api_key", "")
+    monkeypatch.setattr(llm_pool.settings, "gemini_secondacc_api_key", "")
+    yield
+    llm_pool.reset_usage()
 
 
 # ----- sanitize.py -----
@@ -162,6 +178,52 @@ def test_pool_fails_over_on_daily_quota(monkeypatch):
     msg = llm_pool.chat([{"role": "user", "content": "hi"}], prefer="groq")
     assert msg.content == "ok"
     assert calls == ["groq", "cerebras"]  # daily 429 → instant failover
+
+
+def test_circuit_breaker_skips_dead_provider(monkeypatch):
+    # After a provider hits its daily cap, the NEXT call must skip it entirely
+    # instead of re-probing (the storm that wasted 8 Groq 429s per report).
+    import groq as groq_sdk
+    import httpx
+
+    resp429 = httpx.Response(429, request=httpx.Request("POST", "http://g"))
+
+    class FakeMsg:
+        content = "ok"
+
+    class FakeResp:
+        choices = [type("C", (), {"message": FakeMsg()})()]
+
+    calls = []
+
+    class FakeGroq:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**k):
+                    calls.append("groq")
+                    raise groq_sdk.RateLimitError(
+                        "tokens per day (TPD): Limit 100000", response=resp429, body=None)
+
+    class FakeGemini:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**k):
+                    calls.append("gemini")
+                    return FakeResp()
+
+    monkeypatch.setattr(llm_pool.settings, "groq_api_key", "k")
+    monkeypatch.setattr(llm_pool.settings, "cerebras_api_key", "")
+    monkeypatch.setattr(llm_pool.settings, "gemini_api_key", "k")
+    monkeypatch.setattr(llm_pool, "_client",
+                        lambda p: FakeGroq() if p == "groq" else FakeGemini())
+    monkeypatch.setattr(llm_pool.time, "sleep", lambda s: None)
+
+    llm_pool.chat([{"role": "user", "content": "a"}], prefer="groq")  # trips groq
+    calls.clear()
+    llm_pool.chat([{"role": "user", "content": "b"}], prefer="groq")  # groq now skipped
+    assert calls == ["gemini"]  # dead provider not re-probed
 
 
 def test_pool_retries_transient_5xx_then_succeeds(monkeypatch):

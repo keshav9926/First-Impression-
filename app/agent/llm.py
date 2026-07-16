@@ -55,3 +55,10 @@ def generate_with_retry(client, model: str, contents: list, config):
             # exponential fallback only when the server gave no number.
             delay = min(hint, _MAX_SERVER_WAIT) if hint else min(2**attempt, _FALLBACK_MAX_SLEEP)
             time.sleep(delay)
+        except errors.ServerError:
+            # 5xx — Google's side (503 "high demand" on preview models, live-
+            # caught killing a whole report after the exploration was already
+            # paid for). Transient by definition: back off and retry.
+            if attempt == MAX_RETRIES - 1:
+                raise
+            time.sleep(min(2**attempt, _FALLBACK_MAX_SLEEP))

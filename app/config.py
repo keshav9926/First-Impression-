@@ -49,12 +49,17 @@ class Settings(BaseSettings):
     # --- LLM (Google Gemini) — used by qa.py when llm_provider="gemini" ---
     # Free-tier key from https://aistudio.google.com (no card required).
     gemini_api_key: str = ""
+    # Second Google account's key. The primary key's project has no free-tier
+    # access to the 2.0 models (observed limit: 0); a standard AI Studio key
+    # (AIza…) does — 2.0-flash at ~1,500 requests/day free. Used for the Gemini
+    # pool provider so the high-volume agent traffic lands on the big free quota.
+    gemini_secondacc_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"  # single-call workloads (/ask)
     # The Phase 3 agent makes MANY calls per report. On THIS project's Gemini
     # free tier that's a problem (~20 requests/DAY on 2.5-flash; the flash-lite
     # models are unusable here), so the agent can run on Groq instead — see
     # agent_provider below. This is the model used when agent_provider="gemini".
-    gemini_agent_model: str = "gemini-2.5-flash"
+    gemini_agent_model: str = "gemini-3-flash-preview"  # synthesis: newest flash
 
     # --- LLM (Groq) — used by the report agent when agent_provider="groq" ---
     # Free-tier key from https://console.groq.com (no card). Groq's free limits
@@ -69,6 +74,21 @@ class Settings(BaseSettings):
     # JSON verdicts, and fails over across the two on daily-quota 429s.
     cerebras_api_key: str = ""
     cerebras_model: str = "zai-glm-4.7"  # tool-calling + JSON mode verified
+
+    # --- LLM (Gemini) as a pool provider (agent/llm_pool.py) ---
+    # Google's OpenAI-compatible endpoint lets Gemini serve the pool for
+    # explore/personas/judge. 3.1-flash-lite: the one Gemini model live-verified
+    # on BOTH keys (2.0-flash: free tier limit 0 on both; 2.5-flash: 404 "not
+    # available to new users" on key2, daily-capped on key1). Gemini-3-gen
+    # models demand a thought_signature on functionCall parts in multi-turn
+    # history — llm_pool._gemini_safe flattens past tool turns to text, so the
+    # loop works anyway. Uses gemini_secondacc_api_key (fresh 1,000 RPD quota).
+    gemini_pool_model: str = "gemini-3.1-flash-lite"
+
+    # Which provider the agent workloads (explore, personas, judge) try FIRST.
+    # "gemini": second key's 1,000 RPD dwarfs Groq's 100K TPD (~4 reports) and
+    # Cerebras's queue throttling — the failover chain still covers the rest.
+    pool_prefer: str = "gemini"
 
     # --- Which LLM runs the /report agent: "gemini" or "groq" ---
     # Separate from llm_provider (which drives /ask) because the agent is a

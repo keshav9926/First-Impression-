@@ -144,7 +144,7 @@ def verify_groundedness(report: FirstImpressionReport) -> FirstImpressionReport:
                 },
                 {"role": "user", "content": prompt},
             ],
-            prefer="cerebras",
+            prefer=settings.pool_prefer,
             response_format={"type": "json_object"},
         )
         verdicts = _parse_verdicts(message.content or "")
