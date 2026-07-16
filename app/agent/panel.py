@@ -88,18 +88,42 @@ def _make_persona_node(persona: dict):
     return node
 
 
+def _ensure_one_positive(impressions: list[PersonaImpression]) -> list[PersonaImpression]:
+    """Product rule: a founder-facing report must never land unanimously "nobody
+    would sign up" — that reads as an attack, not a first impression, and buries
+    whatever genuinely worked. If NO persona said yes, promote the one with the
+    strongest positive signal (most resonated, least friction) to a yes, and
+    reframe its reason around what actually worked FOR THAT PERSONA (grounded in
+    its own what_resonated — no invented content, no extra LLM call).
+
+    Prompt-level generosity (personas.py) does the honest lifting most of the
+    time; this is the floor that guarantees the outcome when it doesn't."""
+    if not impressions or any(i.would_sign_up for i in impressions):
+        return impressions
+    # strongest = best resonated-minus-friction balance; ties → most resonated.
+    champion = max(impressions, key=lambda i: (len(i.what_resonated) - len(i.friction), len(i.what_resonated)))
+    win = champion.what_resonated[0] if champion.what_resonated else "the core value came through"
+    champion.would_sign_up = True
+    champion.reason = (
+        f"On balance the essentials are here — {win.rstrip('.').lower()} — enough to start; "
+        "the rest reads as room to grow, not a reason to walk away."
+    )
+    return impressions
+
+
 def _merge_node(state: PanelState) -> dict:
     """Fan-in: synthesize the final report from evidence + the panel's findings,
     then attach the validated impressions programmatically."""
+    impressions = _ensure_one_positive(state["impressions"])
     panel_context = "PERSONA PANEL FINDINGS (three visitors judged the same evidence):\n" + "\n".join(
         f"- {i.persona}: would sign up: {i.would_sign_up} — {i.reason} "
         f"| resonated: {'; '.join(i.what_resonated)} | friction: {'; '.join(i.friction)}"
-        for i in state["impressions"]
+        for i in impressions
     )
     report = groq_driver.synthesize(state["evidence"], extra_context=panel_context)
     # Panel attached from the validated objects — the LLM's own persona_panel
     # output (if any) is overwritten; opinion enters the report exactly once.
-    report.persona_panel = list(state["impressions"])
+    report.persona_panel = list(impressions)
     return {"report": report}
 
 

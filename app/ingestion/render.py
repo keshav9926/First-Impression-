@@ -23,6 +23,10 @@ logger = logging.getLogger("first_impression")
 
 # networkidle can hang on sites with long-poll/analytics sockets; cap hard.
 _NAV_TIMEOUT_MS = 20_000
+# Best-effort settle AFTER the DOM is ready: most JS content has hydrated by
+# now; if analytics sockets keep the network busy we don't wait the full nav
+# budget for an "idle" that never comes.
+_IDLE_SETTLE_MS = 4_000
 
 
 @contextmanager
@@ -57,7 +61,13 @@ def render_page(browser, url: str) -> tuple[str, str]:
     """
     page = browser.new_page(user_agent=settings.crawler_user_agent)
     try:
-        page.goto(url, wait_until="networkidle", timeout=_NAV_TIMEOUT_MS)
+        # domcontentloaded is fast + reliable; networkidle alone hangs the full
+        # nav budget on pages with persistent analytics/long-poll sockets.
+        page.goto(url, wait_until="domcontentloaded", timeout=_NAV_TIMEOUT_MS)
+        try:
+            page.wait_for_load_state("networkidle", timeout=_IDLE_SETTLE_MS)
+        except Exception:
+            pass  # never idle → take the DOM we have; better than nothing
         return page.content(), page.inner_text("body")
     except Exception as exc:
         logger.warning("render failed for %s: %s", url, exc)

@@ -36,6 +36,10 @@ _SECONDS_BETWEEN_BATCHES = 21  # free tier: max 3 requests per minute
 # there would discard the whole (already-paid-for) exploration, so embed_query
 # paces and retries into the next minute-window instead of failing the run.
 _MAX_QUERY_RETRIES = 4
+# Ingest embeds MANY batches; a heavy site can trip the 10K TPM window even
+# while under 3 RPM. Retry each batch across several minute-windows rather than
+# discarding the whole crawl on one 429.
+_MAX_DOC_RETRIES = 6
 
 
 def _client() -> voyageai.Client:
@@ -83,8 +87,22 @@ def embed_documents(texts: list[str]) -> list[list[float]]:
     for i, batch in enumerate(batches):
         if i > 0:
             time.sleep(_SECONDS_BETWEEN_BATCHES)  # pace to 3 requests/minute
-        result = client.embed(batch, model=settings.embedding_model, input_type="document")
-        vectors.extend(result.embeddings)
+        # Retry 429s instead of crashing the whole ingest. The 3-RPM pacing
+        # above satisfies the request cap, but the free tier ALSO caps 10K
+        # tokens/minute — a content-heavy site can trip TPM even while under
+        # RPM. On a 429 we wait a full minute-window and re-embed the SAME
+        # batch (mirrors embed_query's retry; embed_documents lacked it).
+        for attempt in range(_MAX_DOC_RETRIES):
+            try:
+                result = client.embed(
+                    batch, model=settings.embedding_model, input_type="document"
+                )
+                vectors.extend(result.embeddings)
+                break
+            except voyageai.error.RateLimitError:
+                if attempt == _MAX_DOC_RETRIES - 1:
+                    raise  # window never cleared — surface the 429
+                time.sleep(_SECONDS_BETWEEN_BATCHES * 3)  # wait out the TPM window
     return vectors
 
 

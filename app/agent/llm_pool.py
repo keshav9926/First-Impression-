@@ -33,6 +33,8 @@ logger = logging.getLogger("first_impression")
 
 _MAX_RATE_RETRIES = 6
 _MAX_FORMAT_RETRIES = 3
+_MAX_SERVER_RETRIES = 3  # transient 5xx (provider hiccup) — retry, then fail over
+_MAX_EMPTY_RETRIES = 3  # blank 200 completion (seen on Cerebras) — retry, then fail over
 
 # Daily-exhaustion markers in provider 429 messages: retrying is pointless
 # until tomorrow, so switch providers instead of sleeping.
@@ -63,7 +65,7 @@ def _retry_after_seconds(exc: Exception) -> float:
         except ValueError:
             pass
     match = re.search(r"try again in ([0-9.]+)s", str(exc))
-    return float(match.group(1)) + 0.5 if match else 2.0
+    return float(match.group(1)) + 0.5 if match else 0.0  # 0.0 = no hint given
 
 
 def _is_daily(exc: Exception) -> bool:
@@ -87,12 +89,40 @@ def chat(messages: list, prefer: str = "groq", **kwargs):
         client = _client(provider)
         rate_tries = 0
         format_tries = 0
+        server_tries = 0
+        empty_tries = 0
         while True:
             try:
                 response = client.chat.completions.create(
                     model=_model(provider), messages=messages, **kwargs
                 )
-                return response.choices[0].message
+                message = response.choices[0].message
+                # Empty completion guard: some models (seen on Cerebras
+                # zai-glm-4.7) intermittently return blank content on a 200.
+                # For our text/JSON callers (personas, judge, synthesis) that
+                # is useless and, unretried, crashed a persona node → the whole
+                # panel. A turn with tool_calls legitimately has empty content
+                # (explore), so only treat blank-AND-no-tool-calls as transient.
+                if not (message.content or "").strip() and not getattr(message, "tool_calls", None):
+                    empty_tries += 1
+                    last_exc = RuntimeError(f"{provider} returned an empty completion")
+                    if empty_tries >= _MAX_EMPTY_RETRIES:
+                        logger.warning("%s kept returning empty — failing over", provider)
+                        break
+                    time.sleep(min(2**empty_tries, 10))
+                    continue
+                return message
+            except (groq.InternalServerError, openai.InternalServerError) as exc:
+                # 5xx = the provider glitched (not our request). These are
+                # transient — a single one must not kill a whole report, which
+                # is how a persona node crashed the panel. Retry with backoff,
+                # then fail over to the other provider.
+                last_exc = exc
+                server_tries += 1
+                if server_tries >= _MAX_SERVER_RETRIES:
+                    logger.warning("%s 5xx persisted — failing over", provider)
+                    break
+                time.sleep(min(2**server_tries, 15))
             except (groq.RateLimitError, openai.RateLimitError) as exc:
                 last_exc = exc
                 if _is_daily(exc):
@@ -101,7 +131,12 @@ def chat(messages: list, prefer: str = "groq", **kwargs):
                 rate_tries += 1
                 if rate_tries >= _MAX_RATE_RETRIES:
                     break  # persistent minute-limit → try the other provider
-                time.sleep(min(_retry_after_seconds(exc), 60))
+                # Honor a server hint; otherwise exponential backoff. A hintless
+                # 429 is usually a transient queue overload ("high traffic, try
+                # again soon" — seen on Cerebras): a flat 2s isn't enough to let
+                # it clear, so back off 2→4→8→16→30s across the retries.
+                hint = _retry_after_seconds(exc)
+                time.sleep(min(hint or 2**rate_tries, 60))
             except (groq.BadRequestError, openai.BadRequestError) as exc:
                 last_exc = exc
                 if "tool_use_failed" not in str(exc):

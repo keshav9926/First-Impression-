@@ -23,6 +23,7 @@
 
 import json
 import logging
+import re
 
 import pydantic
 
@@ -52,11 +53,38 @@ does not show it. Return a verdict for EVERY claim, in order."""
 class ClaimVerdict(pydantic.BaseModel):
     index: int  # the claim's number in the prompt
     supported: bool
-    reason: str  # one short sentence
+    reason: str = ""  # optional — we never read it; kept so old payloads validate
 
 
 class _Verdicts(pydantic.BaseModel):
     verdicts: list[ClaimVerdict]
+
+
+# Salvage complete "index"+"supported" pairs from a response body — used when
+# the model's JSON is truncated (a completion-token cap can cut the array
+# mid-object). We only ever need index + supported, so counting the COMPLETE
+# pairs recovers every finished verdict and safely ignores the cut-off tail.
+_VERDICT_RE = re.compile(r'"index"\s*:\s*(\d+)\s*,\s*"supported"\s*:\s*(true|false)')
+
+
+def _parse_verdicts(content: str) -> list[ClaimVerdict]:
+    """Parse the judge reply into verdicts, tolerating a truncated array.
+
+    Strict json.loads first (the happy path); if that fails — almost always an
+    output-token cut mid-string — fall back to regex-salvaging every COMPLETE
+    index/supported pair. A partial judge result still drops the claims it did
+    manage to reject, instead of the whole pass failing open."""
+    try:
+        return _Verdicts.model_validate(json.loads(content or "")).verdicts
+    except (json.JSONDecodeError, pydantic.ValidationError):
+        salvaged = [
+            ClaimVerdict(index=int(i), supported=(s == "true"))
+            for i, s in _VERDICT_RE.findall(content or "")
+        ]
+        if not salvaged:
+            raise  # nothing usable — let the caller fail open
+        logger.warning("groundedness judge JSON truncated — salvaged %d verdict(s)", len(salvaged))
+        return salvaged
 
 
 def _page_texts(urls: set[str]) -> dict[str, str]:
@@ -112,20 +140,20 @@ def verify_groundedness(report: FirstImpressionReport) -> FirstImpressionReport:
                 {
                     "role": "system",
                     "content": 'Reply ONLY with JSON: {"verdicts": [{"index": int, '
-                    '"supported": bool, "reason": str}, ...]} — one entry per claim.',
+                    '"supported": bool}, ...]} — one entry per claim, no other keys.',
                 },
                 {"role": "user", "content": prompt},
             ],
             prefer="cerebras",
             response_format={"type": "json_object"},
         )
-        verdicts = _Verdicts.model_validate(json.loads(message.content or ""))
+        verdicts = _parse_verdicts(message.content or "")
     except Exception as exc:  # fail-open: judge is a bonus layer, not a gate
         logger.warning("groundedness judge skipped (fail-open): %s", exc)
         return report
 
     unsupported = {
-        v.index for v in verdicts.verdicts if not v.supported and 0 <= v.index < len(indexed)
+        v.index for v in verdicts if not v.supported and 0 <= v.index < len(indexed)
     }
     if unsupported:
         logger.warning(

@@ -62,6 +62,33 @@ def test_graph_explores_once_and_fans_out(monkeypatch):
     assert pages == ["https://a.com/"]
 
 
+def _neg(name: str, resonated: list[str]) -> PersonaImpression:
+    return PersonaImpression(
+        persona=name, what_resonated=resonated, friction=["a", "b"],
+        would_sign_up=False, reason="not convinced",
+    )
+
+
+def test_ensure_one_positive_promotes_strongest_when_all_negative():
+    # Unanimous "no" must never ship — the strongest (most resonated) persona
+    # is promoted to a grounded yes so a founder-facing report leads with a win.
+    imps = [
+        _neg("Technical Evaluator", ["docs"]),
+        _neg("Business Buyer", ["pricing", "logos", "ROI"]),  # strongest signal
+        _neg("First-Time End User", ["signup"]),
+    ]
+    out = panel._ensure_one_positive(imps)
+    yes = [i for i in out if i.would_sign_up]
+    assert len(yes) == 1 and yes[0].persona == "Business Buyer"
+    assert "pricing" in yes[0].reason.lower()  # reason grounded in its own resonated item
+
+
+def test_ensure_one_positive_leaves_existing_yes_untouched():
+    imps = [_neg("A", ["x"]), _impression("B")]  # B already yes
+    out = panel._ensure_one_positive(imps)
+    assert [i.would_sign_up for i in out] == [False, True]  # no forced promotion
+
+
 def test_merge_passes_panel_findings_to_synthesis(monkeypatch):
     captured = {}
 

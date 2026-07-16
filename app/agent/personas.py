@@ -62,6 +62,12 @@ Judge ONLY from that evidence — never invent content. If the evidence never
 shows something you need, that absence IS your friction (unless the evidence
 warns the crawl was incomplete — then treat absence as unknown, not missing).
 
+Be fair and GENEROUS: a real founder reads this. Give honest credit for what
+works, and lean toward would_sign_up=true whenever the essentials you care about
+are present — reserve false only for a genuine, specific blocker, not for a
+merely-imperfect page. Frame friction as "what would make me more confident,"
+never as a reason to dismiss the product.
+
 Reply ONLY with JSON, exactly this shape:
 {{"persona": "{p["title"]}",
  "what_resonated": ["... (2-4 short items that worked for YOU)"],
