@@ -28,13 +28,19 @@
 #                                              synthesizes the cited report
 #                                              (provider: gemini or groq)
 
+import json
 import logging
+import queue
+import threading
+from pathlib import Path
 
 import groq
 import voyageai.error
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse, StreamingResponse
 from google.genai import errors as genai_errors
 
+from app import events
 from app.agent.report import generate_report
 from app.config import settings
 from app.ingestion.chunker import chunk_text
@@ -93,34 +99,22 @@ def health() -> dict:
     return {"status": "ok", "app": settings.app_name, "environment": settings.environment}
 
 
-@app.post("/ingest", response_model=IngestResponse)
-def ingest(request: IngestRequest) -> IngestResponse:
-    """Crawl a public site (robots.txt-compliant), chunk, embed, and store it.
-
-    Called by: the client (you, via /docs or curl).
-    Calls, in order: _require_keys → robots.is_allowed → fetcher.crawl
-                     → chunker.chunk_text → embeddings.embed_documents
-                     → store.replace_all
-    Request/response shapes: IngestRequest / IngestResponse in schemas.py
-    (FastAPI validated the body against IngestRequest BEFORE this runs).
+def _ingest_site(url: str, max_pages: int) -> IngestResponse:
+    """Crawl → sanitize → chunk → embed → store. The shared ingestion core,
+    used by BOTH /ingest and the streaming dashboard, so the two can't drift.
+    Emits progress events (no-op unless a collector is active). Raises plain
+    exceptions; callers map them to HTTP or SSE error events.
     """
-    _require_keys(voyage=True)
-
-    url = str(request.url)
     if not is_allowed(url):
-        # Hard rule #1 enforced at the API boundary: robots.txt says no → we stop.
-        raise HTTPException(
-            status_code=403,
-            detail="robots.txt disallows fetching this URL (public-data rule).",
-        )
+        raise PermissionError("robots.txt disallows fetching this URL (public-data rule).")
 
-    result = crawl(url, max_pages=request.max_pages)
+    events.emit("phase", name="crawl")
+    result = crawl(url, max_pages=max_pages)
     if not result.pages:
-        raise HTTPException(status_code=404, detail="No readable pages found at this URL.")
+        raise ValueError("No readable pages found at this URL.")
 
     # Prompt-injection guard (Phase 5): strip instruction-shaped lines from
-    # untrusted page text BEFORE chunking — poisoned lines never reach the
-    # store. Count surfaces in the response (visible, never silent).
+    # untrusted page text BEFORE chunking — poisoned lines never reach the store.
     injection_lines_removed = 0
     sanitized_pages = []
     for page in result.pages:
@@ -128,43 +122,56 @@ def ingest(request: IngestRequest) -> IngestResponse:
         injection_lines_removed += len(removed)
         sanitized_pages.append((page, clean))
 
-    # Page texts -> chunks, each remembering which page it came from (for
-    # citations) and the page's section headings (for the agent's read_page
-    # section map — Chroma metadata must be scalar, so the list is joined).
-    # extraction_warning rides on every chunk (site-level fact, chunk-level
-    # storage) so the report agent — which only sees the store — knows the
-    # analysis may rest on a fraction of the real site.
+    # Each chunk carries: url (citations), headings (read_page section map),
+    # ctas (signup/demo actions), extraction_warning (JS-thin caveat). Chroma
+    # metadata must be scalar, so lists are joined.
     chunks = [
         {
             "text": piece,
             "url": page.url,
             "headings": " · ".join(page.headings),
-            "ctas": " · ".join(page.ctas),  # primary signup/demo/login actions
+            "ctas": " · ".join(page.ctas),
             "extraction_warning": result.thin_extraction,
         }
         for page, clean in sanitized_pages
         for piece in chunk_text(clean)
     ]
 
-    try:
-        vectors = embeddings.embed_documents([c["text"] for c in chunks])
-    except voyageai.error.RateLimitError:
-        # Free-tier limit hit despite our pacing — tell the caller to retry,
-        # with the right status code (429 = Too Many Requests), not a raw 500.
-        raise HTTPException(
-            status_code=429,
-            detail="Voyage free-tier rate limit hit — wait a minute and retry, "
-            "or ingest with a smaller max_pages.",
-        )
+    events.emit("phase", name="embed", chunks=len(chunks))
+    vectors = embeddings.embed_documents([c["text"] for c in chunks])
     stored = store.replace_all(chunks, vectors)
 
-    return IngestResponse(
+    summary = IngestResponse(
         pages_fetched=len(result.pages),
         chunks_stored=stored,
         skipped_by_robots=result.skipped_by_robots,
         extraction_warning=result.thin_extraction,
         injection_lines_removed=injection_lines_removed,
     )
+    events.emit("ingest.done", **summary.model_dump())
+    return summary
+
+
+@app.post("/ingest", response_model=IngestResponse)
+def ingest(request: IngestRequest) -> IngestResponse:
+    """Crawl a public site (robots.txt-compliant), chunk, embed, and store it.
+
+    Called by: the client (you, via /docs or curl). Delegates to _ingest_site
+    and maps its exceptions to HTTP status codes.
+    """
+    _require_keys(voyage=True)
+    try:
+        return _ingest_site(str(request.url), request.max_pages)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))  # rule #1
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except voyageai.error.RateLimitError:
+        raise HTTPException(
+            status_code=429,
+            detail="Voyage free-tier rate limit hit — wait a minute and retry, "
+            "or ingest with a smaller max_pages.",
+        )
 
 
 NO_CONTENT_ANSWER = (
@@ -319,3 +326,64 @@ def report(panel: bool = False) -> ReportResponse:
         pages_examined=pages_examined,
         tool_calls=tool_calls,
     )
+
+
+# --- Streaming dashboard (Phase 6): ingest + report in one live SSE run ---
+
+_STATIC_DIR = Path(__file__).parent / "static"
+
+
+def _analysis_worker(url: str, max_pages: int, panel: bool, q: queue.Queue) -> None:
+    """Run the FULL pipeline (ingest → report) on a background thread, emitting
+    progress into `q` via events.collector. The sync clients (Groq/Voyage/
+    LangGraph) are blocking, so a thread keeps the SSE generator responsive.
+    Terminates with a 'report.done' (or 'error') event, then a None sentinel."""
+    with events.collector(q):
+        try:
+            _ingest_site(url, max_pages)
+            events.emit("phase", name="analyze")
+            report_obj, steps_log, pages_examined = generate_report(panel=panel)
+            events.emit(
+                "report.done",
+                report=report_obj.model_dump(),
+                steps_taken=len(steps_log),
+                pages_examined=pages_examined,
+            )
+        except Exception as exc:  # any failure → one clean error event for the UI
+            logger.exception("analysis stream failed")
+            events.emit("error", message=f"{type(exc).__name__}: {exc}")
+        finally:
+            q.put(None)  # sentinel: tell the SSE generator to close
+
+
+@app.get("/analyze/stream")
+def analyze_stream(url: str, max_pages: int = 15, panel: bool = True) -> StreamingResponse:
+    """Server-Sent Events: run ingest+report for `url` and stream each step
+    (crawl.page, render.escalate, ingest.done, tool, persona, report.done) so
+    the dashboard can show the agent working live. One event per SSE 'data:'
+    line as compact JSON."""
+    _require_keys(voyage=True)
+    q: queue.Queue = queue.Queue()
+    threading.Thread(
+        target=_analysis_worker, args=(url, max_pages, panel, q), daemon=True
+    ).start()
+
+    def event_stream():
+        while True:
+            event = q.get()
+            if event is None:  # worker finished
+                break
+            yield f"data: {json.dumps(event)}\n\n"
+
+    # no-transform/no-cache so proxies don't buffer the stream.
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/")
+def dashboard() -> FileResponse:
+    """Serve the single-page dashboard."""
+    return FileResponse(_STATIC_DIR / "index.html")

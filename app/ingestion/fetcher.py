@@ -28,6 +28,7 @@ from urllib.parse import urldefrag, urljoin, urlparse
 import httpx
 import trafilatura
 
+from app import events
 from app.config import settings
 from app.ingestion import render
 from app.ingestion.robots import is_allowed
@@ -345,6 +346,7 @@ def _crawl_loop(start_url: str, max_pages: int, fetch) -> CrawlResult:
                     ctas=_extract_ctas(html),
                 )
             )
+            events.emit("crawl.page", url=url, chars=len(text))
         # Feed new same-domain links into the queue (works for JS nav too —
         # the rendered pass discovers links a static fetch never sees).
         for link in _extract_links(html, base_url=url, domain=domain):
@@ -377,6 +379,7 @@ def crawl(start_url: str, max_pages: int) -> CrawlResult:
         return result
 
     logger.info("thin static extraction (%s) — escalating to headless render", start_url)
+    events.emit("render.escalate", url=start_url)
     try:
         with render.browser_session() as browser:
             rendered = _crawl_loop(

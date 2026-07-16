@@ -2,6 +2,17 @@
 
 Reverse order (newest first). For learning + interview recall.
 
+## Phase 6 — streaming dashboard
+
+**(this commit) — live SSE dashboard (Aether-style)**
+- events.py: contextvar event bus. emit() is NO-OP unless a collector is active (plain /report, tests, CLI pay nothing); only the SSE endpoint listens. Producers (crawl/explore/panel/ingest) call events.emit() freely — no signature churn.
+- /analyze/stream (SSE): runs FULL pipeline (ingest→report) in a background THREAD (sync Groq/Voyage/LangGraph clients), events pushed to a thread-safe Queue the SSE generator drains → this IS the async fix for the 2-4min sync block. Ends with report.done (or error) + None sentinel.
+- _ingest_site extracted: shared ingest core for /ingest AND the stream (anti-drift).
+- static/index.html: self-contained, NO build step. Vanilla-ported particle-constellation canvas (mouse-reactive), gradient hero, purple pills, white CTA — the requested Aether aesthetic. Two acts: live trace (crawl pages, JS-render escalation, injection badges, agent tool calls, persona verdicts streaming in) → clean report (persona cards w/ verdict pills, cited observations, suggestions, scope caveat).
+- EventSource consumer; closes on report.done/error (no reconnect re-runs).
+- 52 tests (event bus, dashboard served, SSE streams report.done via mocked pipeline). Smoke: page + SSE headers verified live.
+- Live in-browser run pending Groq daily-token reset (cap hit from testing).
+
 ## Phase 6 — headless rendering (JS sites)
 
 **(this commit) — Playwright fallback: read JS-rendered sites**

@@ -28,6 +28,7 @@ from typing import Annotated, TypedDict
 import groq
 import pydantic
 
+from app import events
 from app.agent import groq_driver, personas
 from app.config import settings
 from app.schemas import FirstImpressionReport, PersonaImpression
@@ -79,7 +80,14 @@ def _make_persona_node(persona: dict):
     """Build one graph node for one persona (closure carries the definition)."""
 
     def node(state: PanelState) -> dict:
-        return {"impressions": [_judge_as(persona, state["evidence"])]}
+        impression = _judge_as(persona, state["evidence"])
+        events.emit(
+            "persona",
+            persona=impression.persona,
+            would_sign_up=impression.would_sign_up,
+            reason=impression.reason,
+        )
+        return {"impressions": [impression]}
 
     return node
 

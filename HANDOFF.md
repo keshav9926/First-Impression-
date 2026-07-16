@@ -144,7 +144,18 @@ Phase 4 planning: multi-agent crew (researcher / user-sim / evaluator / skeptic)
 - STORE STATE: currently holds trynarrative (18 chunks). Re-ingest vortexify
   before demos (Voyage 3-RPM was exhausted from testing; just wait + re-ingest).
 
-## Then: Phase 6+ (renumber — headless was the old "P6" slot)
+## Streaming dashboard DONE (2026-07-16)
+- app/events.py contextvar bus (no-op unless collecting). /analyze/stream SSE:
+  full ingest+report in bg thread → queue → SSE. _ingest_site shared core.
+  app/static/index.html — vanilla Aether-style UI (particle canvas, live trace
+  → report). GET / serves it. 52 tests. Run: uv run uvicorn app.main:app then
+  open http://127.0.0.1:8000/ . Live browser run pending Groq token reset.
+
+## Then: next
+- P8 deploy: Docker + `playwright install-deps chromium` in image; host → live URL.
+- P7 MCP server. Token levers (steps 5→3, compress evidence, cache). Async is
+  effectively done via the stream. Re-ingest vortexify before demo (store may
+  hold trynarrative).
 - Playwright headless rendering for JS sites (agreed, deferred — in memory).
 - P6: streaming dashboard. P7: MCP server. P8: Langfuse, Docker deploy.
 

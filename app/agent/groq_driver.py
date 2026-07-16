@@ -24,6 +24,7 @@ import groq
 from google import genai
 from google.genai import types as genai_types
 
+from app import events
 from app.agent import prompts, tools
 from app.agent.llm import generate_with_retry
 from app.config import settings
@@ -134,6 +135,7 @@ def explore() -> tuple[list, list[dict]]:
                 tc.function.name, args, seen_calls
             ) or tools.execute_tool(tc.function.name, args)
             steps_log.append({"tool": tc.function.name, "args": args})
+            events.emit("tool", name=tc.function.name, args=args)
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": observation})
 
     return messages, steps_log
