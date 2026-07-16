@@ -14,5 +14,8 @@ __pycache__/
 # OS / editor
 .DS_Store
 .vscode/
-# Added by code-review-graph
+# code-review-graph tool artifacts — local dev aid, never commit
 .code-review-graph/
+.claude/
+.mcp.json
+CLAUDE.md
