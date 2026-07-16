@@ -29,8 +29,9 @@ Understand, as a newcomer would:
 How to work:
 1. Call list_pages first to see what exists.
 2. read_page the important pages (home, product/feature pages, pricing, docs). \
-Pass the EXACT url string returned by list_pages — not a short name like \
-"home" or "pricing". Only read urls that list_pages actually returned.
+Pass the EXACT url string returned by list_pages — copy it verbatim. NEVER \
+invent a URL, guess a path, or use a placeholder domain like "example.com": \
+only read urls that list_pages actually returned.
 3. Use search_content to check for things a new visitor looks for but you \
 haven't seen — e.g. "getting started steps", "pricing", "customer support", \
 "security", "integrations". If a search returns nothing, the site likely \

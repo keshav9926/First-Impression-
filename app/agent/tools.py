@@ -77,13 +77,16 @@ def _read_page(url: str) -> str:
     all_chunks = store.all_chunks()
     page_chunks = [c for c in all_chunks if c["url"] == url]
 
-    # Models often pass a bare slug ("pricing", "home") instead of the exact
-    # URL list_pages returned. Recover instead of wasting a step: match a URL
-    # whose path ends with the slug ("home"/"" → the root URL). Only accept an
-    # UNAMBIGUOUS match; if a slug hits several pages, ask for the exact URL.
+    # Models often pass the wrong string instead of the exact URL list_pages
+    # returned — a bare slug ("pricing"), or a hallucinated placeholder domain
+    # ("https://example.com/pricing"). Recover instead of wasting a step by
+    # matching on the LAST path segment against stored URLs. Only accept an
+    # UNAMBIGUOUS match; ambiguous → ask for the exact URL.
     if not page_chunks:
         available = sorted({c["url"] for c in all_chunks})
-        slug = url.strip().strip("/").lower()
+        # Reduce whatever was passed to its last path segment: bare slug stays
+        # itself; "https://example.com/pricing" → "pricing"; root/"home" → "".
+        slug = urlparse(url).path.strip("/").split("/")[-1].lower() if "/" in url else url.strip().lower()
         if slug in ("", "home", "index"):
             # Root page = a URL with an empty path (scheme://host/).
             candidates = [u for u in available if not urlparse(u).path.strip("/")]

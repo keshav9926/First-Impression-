@@ -14,3 +14,5 @@ __pycache__/
 # OS / editor
 .DS_Store
 .vscode/
+# Added by code-review-graph
+.code-review-graph/

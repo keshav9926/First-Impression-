@@ -21,7 +21,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     # Reads variables from a `.env` file if present; real environment
     # variables always take precedence over the file.
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    # extra="ignore": .env may hold keys this app doesn't map (e.g. an
+    # experimental provider key, or a malformed name) — ignore them instead of
+    # failing to boot. Only fields declared below are read.
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
 
     app_name: str = "First Impression"
     environment: str = "development"  # "development" | "production"

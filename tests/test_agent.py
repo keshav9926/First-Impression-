@@ -171,6 +171,15 @@ def test_read_page_recovers_from_a_bare_slug(monkeypatch):
     assert "No page found" not in out
 
 
+def test_read_page_recovers_from_hallucinated_domain(monkeypatch):
+    # Models sometimes invent a placeholder domain ("example.com") instead of
+    # the real URL — recover by matching the last path segment.
+    monkeypatch.setattr(tools.store, "all_chunks", lambda: FAKE_CHUNKS)
+    out = tools.execute_tool("read_page", {"url": "https://example.com/pricing"})
+    assert "$20 per month" in out
+    assert "No page found" not in out
+
+
 def test_read_page_bare_home_resolves_to_root(monkeypatch):
     # "home"/"index"/"" → the URL with an empty path (the site root).
     monkeypatch.setattr(tools.store, "all_chunks", lambda: FAKE_CHUNKS)
