@@ -132,7 +132,19 @@ Phase 4 planning: multi-agent crew (researcher / user-sim / evaluator / skeptic)
 - NOTE: store currently holds asha.health (2 chunks, thin) — re-ingest
   vortexify before demos.
 
-## Then: Phase 6+
+## Playwright headless rendering DONE (2026-07-16) — JS gap closed
+- ingestion/render.py (Playwright chromium, lazy import): render_page → (html,
+  inner_text). fetcher._crawl_loop parametrized; crawl() static-first,
+  escalates to headless re-crawl only when thin. Fail-safe to static.
+- rerank.rerank got the Voyage-429 retry (was missing; embed_query had it).
+- Live: trynarrative now readable (1706c, no JS caveat, real report). vortexify
+  still fast static path. 48 tests. Chromium ~150MB local.
+- TODO: Docker image needs chromium system-deps (playwright install-deps) before
+  containerized deploy (P8).
+- STORE STATE: currently holds trynarrative (18 chunks). Re-ingest vortexify
+  before demos (Voyage 3-RPM was exhausted from testing; just wait + re-ingest).
+
+## Then: Phase 6+ (renumber — headless was the old "P6" slot)
 - Playwright headless rendering for JS sites (agreed, deferred — in memory).
 - P6: streaming dashboard. P7: MCP server. P8: Langfuse, Docker deploy.
 

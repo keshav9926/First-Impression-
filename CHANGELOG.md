@@ -2,6 +2,16 @@
 
 Reverse order (newest first). For learning + interview recall.
 
+## Phase 6 — headless rendering (JS sites)
+
+**(this commit) — Playwright fallback: read JS-rendered sites**
+- THE big deferred gap closed. Static crawl couldn't read Framer/Webflow/SPA sites (trynarrative 368c, asha 95c — the thin-extraction guard flagged them but couldn't fix them).
+- render.py: Playwright headless Chromium (lazy import). render_page → (rendered_html, visible_text). Body text = page.inner_text("body"), NOT trafilatura — trafilatura's article heuristics collapse to ~nothing on component-soup DOMs (368c from a 3MB render); inner_text returns what a human sees (1706c). HTML still used for link/heading/CTA extraction.
+- fetcher refactored: _crawl_loop(fetch) parametrized by fetch strategy. crawl() runs cheap STATIC first; escalates to a headless re-crawl ONLY when _is_thin_extraction trips. Fail-safe: browser missing/crash → static (thin, caveated) result still ships. Rendered pass also discovers JS-nav links a static fetch never sees.
+- BROKE→FIXED (live): report failed on rerank — Voyage 3-RPM; rerank never got the retry embed_query did (Phase 5). Added matching retry to rerank.rerank.
+- Live: trynarrative 368→1706c, thin cleared, REAL report (no JS caveat). asha 95→459c (still sparse → honestly stays flagged). vortexify unchanged: static fast path, no browser (~22s), 15 pages.
+- 48 tests. Chromium ~150MB (local, free). Docker image browser-deps: still TODO.
+
 ## Phase 5 — guardrails
 
 **(this commit) — prompt-injection guard + groundedness judge**

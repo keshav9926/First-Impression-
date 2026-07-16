@@ -19,6 +19,7 @@
 #   crawl() returns a CrawlResult back to main.py, which then passes each
 #   page's text to chunker.chunk_text().
 
+import logging
 import time
 from dataclasses import dataclass
 from html.parser import HTMLParser
@@ -28,7 +29,10 @@ import httpx
 import trafilatura
 
 from app.config import settings
+from app.ingestion import render
 from app.ingestion.robots import is_allowed
+
+logger = logging.getLogger("first_impression")
 
 # Paths that hint at authenticated / non-public areas — rule #1 says we never try these.
 BLOCKED_PATH_HINTS = ("login", "signin", "sign-in", "signup", "sign-up", "account", "logout")
@@ -288,88 +292,98 @@ def _extract_links(html: str, base_url: str, domain: str) -> list[str]:
     return links
 
 
-def crawl(start_url: str, max_pages: int) -> CrawlResult:
-    """THE entry point of this file: breadth-first crawl from start_url.
+def _static_fetch(client: httpx.Client, url: str) -> tuple[str, str]:
+    """One page via static HTTP. Returns (html, text) or ("", "") on failure.
+    text = trafilatura article extraction (favor_precision strips nav/footer —
+    added after a nav-debris chunk scored 0.490 in the 2026-07-12 eval)."""
+    try:
+        response = client.get(url)
+    except httpx.HTTPError:
+        return "", ""
+    content_type = response.headers.get("content-type", "")
+    if response.status_code != 200 or "text/html" not in content_type:
+        return "", ""
+    html = response.text
+    return html, (trafilatura.extract(html, favor_precision=True) or "")
 
-    Called by: main.py ingest() (the /ingest endpoint).
-    Calls: robots.is_allowed() per URL, then httpx to fetch,
-           trafilatura.extract() to get text, _extract_links() to grow the queue.
 
-    "Breadth-first" = we keep a queue: start with one URL, and every page we
-    fetch adds its links to the back of the queue. So we visit the start page,
-    then everything one click away, then two clicks away... until we have
-    max_pages readable pages or run out of URLs.
+def _crawl_loop(start_url: str, max_pages: int, fetch) -> CrawlResult:
+    """Breadth-first crawl driven by a pluggable `fetch(url) -> (html, text)`.
 
-    `seen` prevents visiting the same URL twice (pages link to each other
-    constantly — without this the queue would loop forever).
-    """
+    A queue holds URLs to visit; each fetched page's links join the back of it,
+    so we sweep the start page, then everything one click away, etc., until
+    max_pages readable pages or the queue empties. `seen` blocks revisits.
+    `fetch` is the only thing that differs between the static and headless
+    (JS-rendered) passes — everything else (robots gate, extraction, link
+    discovery, thin detection) is identical, so the two passes can't drift."""
     domain = urlparse(start_url).netloc
     queue = [start_url]
     seen = {start_url}
     pages: list[Page] = []
     skipped_by_robots = 0
-    html_chars_total = 0  # raw HTML seen (denominator of aggregate ratio)
-    text_chars_total = 0  # readable text extracted (numerator)
-    seed_text_chars = 0  # the FIRST fetched page's own text/html (the thin signal)
+    seed_text_chars = 0  # the FIRST fetched page's text/html — the thin signal
     seed_html_chars = 0
 
-    headers = {"User-Agent": settings.crawler_user_agent}
-    with httpx.Client(headers=headers, follow_redirects=True, timeout=15.0) as client:
-        while queue and len(pages) < max_pages:
-            url = queue.pop(0)  # take from the FRONT of the queue (= breadth-first)
+    while queue and len(pages) < max_pages:
+        url = queue.pop(0)  # FRONT of the queue = breadth-first
 
-            # Gate 1: robots.txt permission (robots.py). No permission → no request.
-            if not is_allowed(url):
-                skipped_by_robots += 1
-                continue
+        # Gate: robots.txt permission (rule #1). No permission → no request.
+        if not is_allowed(url):
+            skipped_by_robots += 1
+            continue
 
-            # Gate 2: the actual download. Network errors skip the page, not the crawl.
-            try:
-                response = client.get(url)
-            except httpx.HTTPError:
-                continue
-
-            # Gate 3: only successful HTML responses are worth parsing.
-            content_type = response.headers.get("content-type", "")
-            if response.status_code != 200 or "text/html" not in content_type:
-                continue
-
-            # HTML → readable text (nav/footer/cookie-banner stripped).
-            # favor_precision: stricter boilerplate removal — added after a
-            # nav-debris chunk ("View all →20+ connectors...") scored 0.490
-            # relevance (above threshold) in the 2026-07-12 eval debugging.
-            # Trade-off: precision mode may drop some borderline-legit text;
-            # we accept that — clean chunks matter more than complete ones.
-            html = response.text
-            text = trafilatura.extract(html, favor_precision=True) or ""
-            html_chars_total += len(html)
-            text_chars_total += len(text)
-            if seed_html_chars == 0 and html:
-                # Capture the seed page's own text/html — see _is_thin_extraction.
-                seed_text_chars = len(text)
-                seed_html_chars = len(html)
-            if text.strip():
-                pages.append(
-                    Page(
-                        url=url,
-                        text=text,
-                        headings=_extract_headings(html),
-                        ctas=_extract_ctas(html),
-                    )
+        html, text = fetch(url)  # static HTTP or headless render
+        if seed_html_chars == 0 and html:
+            seed_text_chars = len(text)
+            seed_html_chars = len(html)
+        if text.strip():
+            pages.append(
+                Page(
+                    url=url,
+                    text=text,
+                    headings=_extract_headings(html),
+                    ctas=_extract_ctas(html),
                 )
+            )
+        # Feed new same-domain links into the queue (works for JS nav too —
+        # the rendered pass discovers links a static fetch never sees).
+        for link in _extract_links(html, base_url=url, domain=domain):
+            if link not in seen:
+                seen.add(link)
+                queue.append(link)
 
-            # Feed new same-domain links into the queue for later iterations.
-            for link in _extract_links(html, base_url=url, domain=domain):
-                if link not in seen:
-                    seen.add(link)
-                    queue.append(link)
+        time.sleep(settings.request_delay_seconds)  # politeness delay
 
-            time.sleep(settings.request_delay_seconds)  # politeness delay (rate limit)
-
-    ratio = (text_chars_total / html_chars_total) if html_chars_total else 1.0
     return CrawlResult(
         pages=pages,
         skipped_by_robots=skipped_by_robots,
-        extraction_ratio=ratio,
         thin_extraction=_is_thin_extraction(seed_text_chars, seed_html_chars),
     )
+
+
+def crawl(start_url: str, max_pages: int) -> CrawlResult:
+    """THE entry point: static crawl first; if the site reads as JS-rendered
+    (thin extraction), re-crawl once with a headless browser.
+
+    Called by: main.py ingest(). The cheap static path serves the majority
+    (server-rendered) sites; a ~1000x-heavier browser spins up only when the
+    static seed page came back near-empty. Fails safe: if the browser is
+    unavailable, the static (thin, caveated) result still ships."""
+    headers = {"User-Agent": settings.crawler_user_agent}
+    with httpx.Client(headers=headers, follow_redirects=True, timeout=15.0) as client:
+        result = _crawl_loop(start_url, max_pages, lambda u: _static_fetch(client, u))
+
+    if not result.thin_extraction:
+        return result
+
+    logger.info("thin static extraction (%s) — escalating to headless render", start_url)
+    try:
+        with render.browser_session() as browser:
+            rendered = _crawl_loop(
+                start_url, max_pages, lambda u: render.render_page(browser, u)
+            )
+    except Exception as exc:
+        # Browser missing / crashed → keep the static result (already thin-flagged).
+        logger.error("headless render unavailable (%s) — keeping static result", exc)
+        return result
+    return rendered if rendered.pages else result
