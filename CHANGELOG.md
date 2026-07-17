@@ -2,6 +2,16 @@
 
 Reverse order (newest first). For learning + interview recall.
 
+## Phase 7 — MCP server (analyzer as a tool)
+
+**(this commit) — First Impression exposed over the Model Context Protocol**
+- WHY: the whole pipeline was only reachable over HTTP. Phase 7 adds a second front door so any MCP client (Claude Desktop, Claude Code, an IDE) can call the analyzer as a native tool — the portfolio-relevant "expose your system as an agent tool" milestone.
+- `app/mcp_server.py`: a FastMCP server (stdio transport) with three tools — `analyze_first_impression(url, max_pages, panel)` (end-to-end crawl → ReAct report, returns the structured `FirstImpressionReport` dict), `ask_ingested(question, top_k)` (grounded Q&A over the last-ingested site), `ingestion_status()` (what's in the store now).
+- NOT a reimplementation: every tool delegates to the exact functions the FastAPI endpoints call (`_ingest_site`, `generate_report`, `pipeline.retrieve` + `qa.answer`), so HTTP and MCP can never drift. Same robots gate, same `InsufficientEvidenceError` refusal, same fail-closed relevance gate.
+- CONTRACT: tools return structured `{status, ...}` dicts (never raise into the client), and map the same failure modes the HTTP layer does — missing key → error, robots-blocked / thin crawl → refusal (not a hallucinated report), nothing relevant → honest "no grounded answer". `max_pages` clamped to the hard limit server-side.
+- stdio hygiene: the protocol owns stdout, so the server only logs to stderr and prints nothing.
+- Added `mcp>=1.2.0` dep. 9 new tests (key guards, robots/insufficient-evidence refusals, happy-path shapes, relevance gate, max_pages clamp) → 72 tests, lint clean. Boot-verified over stdio; tools register + list correctly.
+
 ## Finalized model chain — NVIDIA quality-first, robustness, cleanup
 
 **(this commit) — GLM-led NVIDIA chain + refuse-on-empty + Cerebras retired**

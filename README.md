@@ -20,6 +20,7 @@ Full spec: [project.md](project.md)
 - **JS-site rendering** — static crawl escalates to a headless Playwright render when extraction is thin, so Framer/Webflow/SPA sites are readable
 - **Guardrails** — prompt-injection sanitizer pre-chunking + a groundedness judge that drops claims the cited page doesn't support
 - **Multi-provider LLM chain** — one NVIDIA NIM key drives a quality-first fallback chain (GLM-5.2 → DeepSeek-V4-Pro → Nemotron-3-Ultra → Mistral-Medium-3.5), with Gemini/Groq on separate keys as deep rate-limit insurance; automatic failover + circuit breaker + usage accounting
+- **MCP server** — the analyzer is exposed over the Model Context Protocol (stdio), so any MCP client (Claude Desktop, Claude Code, an IDE) can call `analyze_first_impression` / `ask_ingested` as native tools — the same pipeline the HTTP API serves, no drift
 - **Eval harness** — retrieval precision/recall evals over a curated dataset with configurable relevance-threshold tuning
 
 ---
@@ -167,6 +168,41 @@ The compose file mounts `.env` automatically — no extra config needed.
 
 ---
 
+## Run as an MCP Server
+
+The analyzer is also a [Model Context Protocol](https://modelcontextprotocol.io) server, so an MCP client (Claude Desktop, Claude Code, an IDE) can call it as a tool instead of over HTTP.
+
+```sh
+# Serve the tools over stdio (the transport local MCP clients speak)
+uv run python -m app.mcp_server
+```
+
+Register it in your MCP client's config (paths are examples):
+
+```json
+{
+  "mcpServers": {
+    "first-impression": {
+      "command": "uv",
+      "args": ["run", "python", "-m", "app.mcp_server"],
+      "cwd": "/absolute/path/to/First-Impression-"
+    }
+  }
+}
+```
+
+**Tools exposed**
+
+| Tool | What it does |
+|------|--------------|
+| `analyze_first_impression(url, max_pages=15, panel=True)` | Crawl → ReAct report → structured `FirstImpressionReport` (every claim cited) |
+| `ask_ingested(question, top_k=5)` | Grounded Q&A over the most recently analyzed site |
+| `ingestion_status()` | Whether a site is currently ingested (chunk count + source pages) |
+
+Each tool delegates to the same pipeline functions the HTTP endpoints call, and returns a structured `{status, ...}` result — a robots-blocked or thin crawl refuses rather than fabricating a report, exactly as `/report` does.
+
+---
+
 ## Run Retrieval Evals
 
 ```sh
@@ -204,7 +240,7 @@ uv run python evals/debug_retrieval.py
 | 4 | ✅ | Persona panel (technical / business / first-time) via LangGraph fan-out |
 | 5 | ✅ | Guardrails: groundedness judge (LLM-as-judge) + prompt-injection sanitizer |
 | 6 | ✅ | Playwright JS rendering, streaming `/analyze/stream` dashboard, multi-provider pool (circuit breaker + usage accounting), evidence-floor guard |
-| 7 | 🔜 | Custom MCP server exposing the analyzer as a tool |
+| 7 | ✅ | Custom MCP server (`app/mcp_server.py`) exposing the analyzer as stdio tools |
 | 8 | 🔜 | Observability (Langfuse traces), finalize Docker deployment |
 
 ---
