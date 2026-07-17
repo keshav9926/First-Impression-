@@ -85,10 +85,25 @@ class Settings(BaseSettings):
     # loop works anyway. Uses gemini_secondacc_api_key (fresh 1,000 RPD quota).
     gemini_pool_model: str = "gemini-3.1-flash-lite"
 
-    # Which provider the agent workloads (explore, personas, judge) try FIRST.
-    # "gemini": second key's 1,000 RPD dwarfs Groq's 100K TPD (~4 reports) and
-    # Cerebras's queue throttling — the failover chain still covers the rest.
-    pool_prefer: str = "gemini"
+    # --- LLM (NVIDIA NIM) — the FINALIZED agent chain (agent/llm_pool.py) ---
+    # One nvapi- key serves all four via integrate.api.nvidia.com. Chosen by a
+    # full-report benchmark on real sites + Artificial Analysis cross-check:
+    #   glm      GLM-5.2            — top all-round (AA intel 51, sharpest grounding)
+    #   dspro    DeepSeek-V4-Pro    — richest persona/synthesis; CANNOT explore (no tools)
+    #   nemo     Nemotron-3-Ultra   — agentic-built, fast (186 t/s), tool-calling
+    #   mistral  Mistral-Medium-3.5 — most complete extraction
+    # Fallback order glm→dspro→nemo→mistral; the pool skips dspro when tools are
+    # requested (explore), since its tool-calling fails. Same key = shared account
+    # quota, so Gemini/Groq remain the deep fallback for real rate-limit insurance.
+    nvidia_api_key: str = ""
+    nvidia_glm_model: str = "z-ai/glm-5.2"
+    nvidia_dspro_model: str = "deepseek-ai/deepseek-v4-pro"
+    nvidia_nemo_model: str = "nvidia/nemotron-3-ultra-550b-a55b"
+    nvidia_mistral_model: str = "mistralai/mistral-medium-3.5-128b"
+
+    # Which provider the agent workloads (explore, personas, judge, synthesis)
+    # try FIRST. "glm" = the finalized quality-first NVIDIA chain above.
+    pool_prefer: str = "glm"
 
     # --- Which LLM runs the /report agent: "gemini" or "groq" ---
     # Separate from llm_provider (which drives /ask) because the agent is a

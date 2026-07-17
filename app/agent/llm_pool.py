@@ -49,14 +49,18 @@ _TRANSIENT_COOLDOWN = 60.0  # 1 min — throttle/5xx/empty; re-probe soon
 _DAILY_MARKERS = ("per day", "tokens per day", "tpd", "rpd", "daily")
 
 
-# Failover chain, in preference order after the caller's `prefer`. TWO Gemini
-# accounts come first — each 3.1-flash-lite key has its OWN 500-RPD free quota,
-# so using both gives ~1,000 looping requests/day before Groq/Cerebras (deep
-# fallback) are touched. All speak chat.completions — one pool, four providers.
-#   gemini  = account 1 (gemini_api_key)          — looping tries key1 first
-#   gemini2 = account 2 (gemini_secondacc_api_key) — then key2
-_PROVIDERS = ("gemini", "gemini2", "groq", "cerebras")
+# Failover chain, in preference order after the caller's `prefer`. The finalized
+# NVIDIA quality chain leads (all one nvapi- key, integrate.api.nvidia.com);
+# Gemini/Groq are the DEEP fallback (a DIFFERENT key = real rate-limit insurance,
+# since the four NVIDIA models share one account quota).
+#   glm → dspro → nemo → mistral  (NVIDIA)  then  gemini → gemini2 → groq → cerebras
+_PROVIDERS = ("glm", "dspro", "nemo", "mistral", "gemini", "gemini2", "groq", "cerebras")
+_NVIDIA_PROVIDERS = ("glm", "dspro", "nemo", "mistral")
 _GEMINI_PROVIDERS = ("gemini", "gemini2")  # need history-flattening + model override
+# DeepSeek-V4-Pro fails tool-calling (verified) — skip it when tools are wanted
+# (the explore loop), or it errors instead of serving. Fine for persona/synthesis.
+_NO_TOOLS = ("dspro",)
+_NVIDIA_BASE = "https://integrate.api.nvidia.com/v1"
 
 # Google exposes Gemini behind an OpenAI-compatible surface, so it drops into
 # this pool with the same client + kwargs (tools=, response_format=) as the rest.
@@ -71,9 +75,11 @@ def _provider_key(provider: str) -> str:
     if provider == "cerebras":
         return settings.cerebras_api_key
     if provider == "gemini":
-        return settings.gemini_api_key  # account 1 (looping tries this first)
+        return settings.gemini_api_key  # account 1
     if provider == "gemini2":
         return settings.gemini_secondacc_api_key  # account 2
+    if provider in _NVIDIA_PROVIDERS:
+        return settings.nvidia_api_key  # one key for all four NVIDIA models
     return ""
 
 
@@ -84,6 +90,8 @@ def _client(provider: str):
         return groq.Groq(api_key=settings.groq_api_key)
     if provider in _GEMINI_PROVIDERS:
         return openai.OpenAI(base_url=_GEMINI_OPENAI_BASE, api_key=_provider_key(provider))
+    if provider in _NVIDIA_PROVIDERS:
+        return openai.OpenAI(base_url=_NVIDIA_BASE, api_key=settings.nvidia_api_key)
     return openai.OpenAI(
         base_url="https://api.cerebras.ai/v1", api_key=settings.cerebras_api_key
     )
@@ -115,11 +123,21 @@ def _gemini_safe(messages: list) -> list:
     return out
 
 
+_NVIDIA_MODEL_ATTR = {
+    "glm": "nvidia_glm_model",
+    "dspro": "nvidia_dspro_model",
+    "nemo": "nvidia_nemo_model",
+    "mistral": "nvidia_mistral_model",
+}
+
+
 def _model(provider: str) -> str:
     if provider == "groq":
         return settings.groq_model
     if provider in _GEMINI_PROVIDERS:
         return settings.gemini_pool_model
+    if provider in _NVIDIA_PROVIDERS:
+        return getattr(settings, _NVIDIA_MODEL_ATTR[provider])
     return settings.cerebras_model
 
 
@@ -213,6 +231,11 @@ def chat(messages: list, prefer: str = "groq", gemini_model: str | None = None, 
         p for p in order
         if _provider_key(p) and not (p in seen or seen.add(p))
     ]
+    # Tool-gate: a call passing tools= needs a tool-capable model. Drop providers
+    # known to fail tool-calling (DeepSeek-V4-Pro) so the explore loop doesn't
+    # fall onto one and error instead of failing over.
+    if kwargs.get("tools"):
+        order = [p for p in order if p not in _NO_TOOLS]
     order = _live(order)  # skip providers on circuit-breaker cooldown
     last_exc: Exception = RuntimeError("no LLM provider configured")
 

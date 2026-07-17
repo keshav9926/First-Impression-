@@ -17,7 +17,9 @@
 #   report.py generate_report() → generate()   (when agent_provider == "groq")
 
 import json
+import re
 
+import pydantic
 from google import genai
 from google.genai import types as genai_types
 
@@ -26,6 +28,57 @@ from app.agent import llm_pool, prompts, tools
 from app.agent.llm import generate_with_retry
 from app.config import settings
 from app.schemas import FirstImpressionReport
+
+# The report JSON shape, for providers WITHOUT native response_schema (the NVIDIA
+# chain over OpenAI-compat). Mirrors FirstImpressionReport minus persona_panel,
+# which is attached programmatically by the panel graph, never asked of the LLM.
+_REPORT_JSON_SHAPE = (
+    '{"company": str, '
+    '"what_the_product_is": [{"claim": str, "evidence": str, "source_url": str}], '
+    '"likely_new_user_journey": [{"claim": str, "evidence": str, "source_url": str}], '
+    '"friction_points": [{"claim": str, "evidence": str, "source_url": str}], '
+    '"standout_strengths": [{"claim": str, "evidence": str, "source_url": str}], '
+    '"unanswered_questions": [str], '
+    '"improvement_opportunities": [{"observed": str, "suggestion": str, "source_url": str}], '
+    '"scope_note": str}'
+)
+
+
+def _synthesize_via_pool(synthesis_prompt: str) -> FirstImpressionReport | None:
+    """Synthesize via the finalized NVIDIA chain (GLM → DeepSeek-Pro → Nemotron →
+    Mistral) over OpenAI-compat JSON mode. Returns a validated report, or None if
+    the whole chain produced nothing parseable (caller then falls back to Gemini).
+    """
+    system = (
+        prompts.EXPLORE_SYSTEM
+        + "\n\nReply ONLY with JSON of this exact shape (no other keys, no prose):\n"
+        + _REPORT_JSON_SHAPE
+    )
+    try:
+        message = llm_pool.chat(
+            [{"role": "system", "content": system},
+             {"role": "user", "content": synthesis_prompt}],
+            prefer=settings.pool_prefer,
+            response_format={"type": "json_object"},
+        )
+    except Exception:
+        return None  # whole NVIDIA chain unavailable → Gemini fallback
+    raw = message.content or ""
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", raw, re.DOTALL)  # salvage a truncated/wrapped object
+        if not match:
+            return None
+        try:
+            data = json.loads(match.group(0))
+        except json.JSONDecodeError:
+            return None
+    data.pop("persona_panel", None)  # attached programmatically, never from the LLM
+    try:
+        return FirstImpressionReport.model_validate(data)
+    except pydantic.ValidationError:
+        return None
 
 # Retry/failover machinery lives in llm_pool.chat() — one place for both
 # providers (Groq + Cerebras). Step cap lives in settings.agent_max_steps.
@@ -117,21 +170,32 @@ def flatten_context(messages: list) -> str:
 
 
 def synthesize(context: str, extra_context: str = "") -> FirstImpressionReport:
-    """Phase B: Gemini turns the evidence into the schema-constrained report.
+    """Phase B: turn the evidence into the schema-constrained report.
 
     Called by: generate() below and agent/panel.py (which passes the persona
     panel's findings as extra_context so the final report can reflect them).
-    generate_with_retry: the whole exploration is already paid for by now — a
-    transient Gemini free-tier 429 must not throw that work away.
+
+    Primary: the finalized NVIDIA quality chain (GLM-5.2 → DeepSeek-V4-Pro →
+    Nemotron-3-Ultra → Mistral-Medium-3.5) via the pool. Fallback: native Gemini
+    with response_schema (a different key = rate-limit insurance, and Gemini's
+    schema-constrained decoding is a reliable last resort if the NVIDIA chain
+    returns nothing parseable).
     """
     synthesis_prompt = (
         "Below is the raw exploration log from a ReAct agent that examined the "
-        "company's public website using Groq.\n\n"
+        "company's public website.\n\n"
         + context
         + (f"\n\n{extra_context}" if extra_context else "")
         + "\n\n"
         + prompts.SYNTHESIZE_INSTRUCTION
     )
+
+    # Primary path: the finalized NVIDIA chain.
+    report = _synthesize_via_pool(synthesis_prompt)
+    if report is not None:
+        return report
+
+    # Fallback path: native Gemini (schema-constrained).
     synthesis_config = genai_types.GenerateContentConfig(
         system_instruction=prompts.EXPLORE_SYSTEM,
         response_mime_type="application/json",

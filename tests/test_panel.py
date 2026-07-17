@@ -118,6 +118,27 @@ def test_single_agent_path_clears_fabricated_panel(monkeypatch):
     monkeypatch.setattr(report_mod.settings, "agent_provider", "groq")
     monkeypatch.setattr(report_mod.groq_driver, "generate", lambda: (fabricated, [], []))
     monkeypatch.setattr(report_mod, "apply_guards", lambda r: r)
+    # Store must clear the evidence floor or generate_report refuses outright.
+    monkeypatch.setattr(report_mod.store, "all_chunks",
+                        lambda: [{"text": "x" * 500, "url": "https://a.com/"}])
 
     report, _, _ = report_mod.generate_report(panel=False)
     assert report.persona_panel == []
+
+
+def test_report_refuses_empty_evidence(monkeypatch):
+    # The core fix: no report may be produced from an empty/near-empty store —
+    # otherwise the synthesis LLM fabricates one (observed on a robots-blocked
+    # crawl that stored 0 pages).
+    import pytest
+
+    from app.agent import report as report_mod
+
+    called = {"driver": 0}
+    monkeypatch.setattr(report_mod.groq_driver, "generate",
+                        lambda: called.__setitem__("driver", 1))
+    monkeypatch.setattr(report_mod.store, "all_chunks", lambda: [])
+
+    with pytest.raises(report_mod.InsufficientEvidenceError):
+        report_mod.generate_report(panel=False)
+    assert called["driver"] == 0  # refused BEFORE any LLM call

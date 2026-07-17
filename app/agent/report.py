@@ -28,6 +28,20 @@ from app.config import settings
 from app.rag import store
 from app.schemas import FirstImpressionReport
 
+# Below this much stored text a report cannot be grounded — refuse rather than
+# hallucinate. A robots-blocked or dead crawl stores ~0 chars, yet a synthesis
+# LLM will still invent a plausible, fully-fabricated report from empty
+# evidence (observed directly). /ask already 409s on an empty store; /report
+# must refuse too. 200 chars ≈ a couple of sentences — anything real clears it;
+# genuinely-thin-but-present sites are handled separately by the thin caveat.
+_MIN_EVIDENCE_CHARS = 200
+
+
+class InsufficientEvidenceError(ValueError):
+    """Raised when the store holds too little to ground a report. Subclasses
+    ValueError so older callers still catch it; main.py maps it to HTTP 409
+    (a state problem — 'ingest first' — not a 502 synthesis failure)."""
+
 
 def _generate_gemini() -> tuple[FirstImpressionReport, list[dict], list[str]]:
     """Run explore → synthesize on Gemini."""
@@ -110,7 +124,20 @@ def generate_report(panel: bool = False) -> tuple[FirstImpressionReport, list[di
     May raise provider rate-limit errors — the endpoint maps them to HTTP codes.
     panel=True runs the Phase 4 LangGraph persona panel (explore once → three
     personas in parallel → merged report with persona_panel attached).
+
+    Refuses (ValueError) when the store holds too little to ground a report —
+    the agent would otherwise "explore" nothing and the synthesis LLM would
+    fabricate a report from empty evidence. main.py maps this to HTTP 409.
     """
+    chunks = store.all_chunks()
+    total_chars = sum(len(c.get("text") or "") for c in chunks)
+    if not chunks or total_chars < _MIN_EVIDENCE_CHARS:
+        raise InsufficientEvidenceError(
+            f"Not enough ingested content to ground a report ({len(chunks)} chunks, "
+            f"{total_chars} chars). Ingest a crawlable public site first — a grounded "
+            "report cannot be produced from empty evidence, and must not be hallucinated."
+        )
+
     if panel:
         from app.agent.panel import run_panel  # local: langgraph import stays optional
 

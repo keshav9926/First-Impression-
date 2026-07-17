@@ -41,7 +41,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from google.genai import errors as genai_errors
 
 from app import events
-from app.agent.report import generate_report
+from app.agent.report import InsufficientEvidenceError, generate_report
 from app.config import settings
 from app.ingestion.chunker import chunk_text
 from app.ingestion.fetcher import crawl
@@ -315,6 +315,10 @@ def report(panel: bool = False) -> ReportResponse:
             detail="Gemini rate limit hit during analysis — the free daily "
             "quota may be exhausted; retry later.",
         )
+    except InsufficientEvidenceError as exc:
+        # Store too thin to ground a report — a state problem, not a synthesis
+        # failure. Refuse (409) instead of letting the LLM hallucinate one.
+        raise HTTPException(status_code=409, detail=str(exc))
     except ValueError as exc:
         # The synthesis call returned no parseable report (see agent drivers).
         raise HTTPException(status_code=502, detail=str(exc))
