@@ -26,6 +26,7 @@ import time
 import groq
 import openai
 
+from app import observability
 from app.config import settings
 
 logger = logging.getLogger("first_impression")
@@ -270,6 +271,17 @@ def chat(messages: list, prefer: str = "groq", gemini_model: str | None = None, 
                     time.sleep(min(2**empty_tries, 10))
                     continue
                 _tally(provider, model_name, "ok")
+                # Phase 8: log this successful call as a Langfuse generation
+                # (no-op unless tracing is configured). Nests under the active
+                # report_trace via OTEL context — one choke point for explore,
+                # personas, judge, and pool synthesis alike.
+                observability.record_generation(
+                    name=f"chat:{provider}",
+                    model=model_name,
+                    input=body,
+                    output=message.content,
+                    usage=getattr(response, "usage", None),
+                )
                 return message
             except (groq.InternalServerError, openai.InternalServerError) as exc:
                 # 5xx = the provider glitched (not our request). These are

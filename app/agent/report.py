@@ -21,6 +21,7 @@
 from google import genai
 from google.genai import types
 
+from app import observability
 from app.agent import grounding, groq_driver, judge, prompts, tools
 from app.agent.llm import generate_with_retry
 from app.agent.react import run_react_loop
@@ -138,17 +139,28 @@ def generate_report(panel: bool = False) -> tuple[FirstImpressionReport, list[di
             "report cannot be produced from empty evidence, and must not be hallucinated."
         )
 
-    if panel:
-        from app.agent.panel import run_panel  # local: langgraph import stays optional
+    # Phase 8: trace the whole run to Langfuse (no-op unless configured). Every
+    # LLM call below — explore, personas, judge, synthesis — nests under this
+    # span automatically via llm_pool.chat's record_generation.
+    pages = sorted({c.get("url", "") for c in chunks if c.get("url")})
+    with observability.report_trace(panel=panel, chunks=len(chunks), pages=len(pages)):
+        observability.update_trace_io(input={"pages": pages, "panel": panel})
 
-        report, steps_log, pages_examined = run_panel()
-    elif settings.agent_provider == "groq":
-        report, steps_log, pages_examined = groq_driver.generate()
-    else:
-        report, steps_log, pages_examined = _generate_gemini()
+        if panel:
+            from app.agent.panel import run_panel  # local: langgraph import stays optional
 
-    if not panel:
-        # Single-agent path: the synthesis LLM may have fabricated a panel from
-        # the schema — real impressions come only from the panel graph.
-        report.persona_panel = []
-    return apply_guards(report), steps_log, pages_examined
+            report, steps_log, pages_examined = run_panel()
+        elif settings.agent_provider == "groq":
+            report, steps_log, pages_examined = groq_driver.generate()
+        else:
+            report, steps_log, pages_examined = _generate_gemini()
+
+        if not panel:
+            # Single-agent path: the synthesis LLM may have fabricated a panel
+            # from the schema — real impressions come only from the panel graph.
+            report.persona_panel = []
+        final = apply_guards(report), steps_log, pages_examined
+        observability.update_trace_io(
+            output={"company": report.company, "pages_examined": pages_examined}
+        )
+        return final

@@ -117,6 +117,17 @@ class Settings(BaseSettings):
     # daily quota is exhausted).
     groundedness_judge: bool = True
 
+    # --- Observability (Phase 8, Langfuse) — used by app/observability.py ---
+    # When BOTH keys are set, each report run is traced to Langfuse: one span
+    # tree per report with every LLM call as a nested generation (model, tokens,
+    # latency). Absent keys → tracing is a hard no-op (like events.py), so
+    # /health, tests, and CLI runs pay nothing and need no Langfuse account.
+    # Free cloud project at https://cloud.langfuse.com (EU host by default;
+    # set LANGFUSE_HOST=https://us.cloud.langfuse.com for the US region).
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+    langfuse_host: str = "https://cloud.langfuse.com"
+
     # --- Embeddings (Voyage AI) — used by embeddings.py ---
     voyage_api_key: str = ""
     embedding_model: str = "voyage-3.5"

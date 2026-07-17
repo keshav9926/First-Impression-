@@ -23,6 +23,7 @@ dependencies = [
     "playwright>=1.61.0",
     "openai>=2.45.0",
     "mcp>=1.2.0",        # Model Context Protocol SDK — the Phase 7 server (app/mcp_server.py)
+    "langfuse>=4.14.0",
 ]
 
 [dependency-groups]

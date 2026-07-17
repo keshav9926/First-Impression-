@@ -23,7 +23,7 @@ import pydantic
 from google import genai
 from google.genai import types as genai_types
 
-from app import events
+from app import events, observability
 from app.agent import llm_pool, prompts, tools
 from app.agent.llm import generate_with_retry
 from app.config import settings
@@ -224,6 +224,14 @@ def synthesize(context: str, extra_context: str = "") -> FirstImpressionReport:
             # Count this native (non-pool) Gemini call so get_usage() reflects
             # total quota consumption — 1 request/report when healthy.
             llm_pool.record(f"gemini-native:{model}")
+            # Phase 8: trace the native synthesis too (the pool path is traced in
+            # llm_pool.chat; this is the fallback branch). No-op unless enabled.
+            observability.record_generation(
+                name="synthesis:gemini-native",
+                model=model,
+                input=synthesis_prompt,
+                output=getattr(synthesis_response, "text", None),
+            )
         except Exception as exc:  # exhausted retries on this candidate → next
             llm_pool.record(f"gemini-native:{model}", "error")
             last_exc = exc

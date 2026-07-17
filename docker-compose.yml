@@ -1,6 +1,6 @@
-# docker-compose.yml — one-command local run: `docker compose up`.
-# Today it's just the API; later phases can add services (e.g. a vector DB)
-# as additional entries under `services:`.
+# docker-compose.yml — one-command local run: `docker compose up --build`.
+# One service (the API); the vector store is embedded (ChromaDB on disk), kept
+# on a named volume so ingested content survives container restarts.
 
 services:
   api:
@@ -9,3 +9,18 @@ services:
       - "8000:8000"   # host:container — the API is reachable at localhost:8000
     env_file:
       - .env          # inject local config/secrets without baking them into the image
+    volumes:
+      # Persist the on-disk vector store (config.chroma_dir = ./chroma_data →
+      # /code/chroma_data) so a restart doesn't wipe what was ingested.
+      - chroma_data:/code/chroma_data
+    healthcheck:
+      # Uses python (present in the image) rather than curl (absent in -slim).
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s   # allow for cold model/client init on first boot
+    restart: unless-stopped
+
+volumes:
+  chroma_data:

@@ -2,6 +2,16 @@
 
 Reverse order (newest first). For learning + interview recall.
 
+## Phase 8 — observability + finalized Docker
+
+**(this commit) — optional Langfuse tracing + a container that actually runs the whole pipeline**
+- OBSERVABILITY: `app/observability.py`, a Langfuse facade with the same no-op-unless-configured philosophy as `events.py`. Both `LANGFUSE_*` keys set → each report run is one span tree; every LLM call nests under it as a generation (model, prompt/completion, token usage, latency). Absent keys → hard no-op, Langfuse is never even imported at call time, so tests/CLI/key-less runs pay nothing.
+- ONE insertion point per concern: `report_trace()` wraps `report.generate_report` (covers /report, /analyze/stream, AND the MCP tool — one place); `record_generation()` fires from the single LLM choke point `llm_pool.chat` on success (explore, personas, judge, pool synthesis) plus the native-Gemini synthesis fallback. New call sites need no plumbing — a generation created inside an active trace nests via OpenTelemetry context. Flush on trace exit so short-lived request processes ship their spans.
+- HARD RULE: observability must NEVER break a report. Every Langfuse call is wrapped and swallows SDK/network errors (test proves `record_generation` eats a raising client). Langfuse 4.14 API: `start_as_current_observation(as_type=...)` for the trace span, `start_observation(...)` for leaf generations.
+- DOCKER FINALIZED: the old image never installed Playwright's browser → JS-site rendering (the whole Phase 6 fix) would silently fail in prod. Now `RUN playwright install --with-deps chromium` (its own cache layer), base bumped to `python:3.13-slim` for dev/lock parity, `EXPOSE 8000`.
+- COMPOSE HARDENED: named volume `chroma_data` persists the vector store across restarts (was ephemeral — a restart wiped every ingest); `/health` healthcheck (python urllib, since -slim has no curl); `restart: unless-stopped`. `docker compose config` validates. (Daemon was down locally → image build itself still needs a one-time verify.)
+- +langfuse>=4.14 dep. 6 new tests (no-op path, enabled path via a fake client, usage mapping, never-raises) → 78 tests, lint clean.
+
 ## Phase 7 — MCP server (analyzer as a tool)
 
 **(this commit) — First Impression exposed over the Model Context Protocol**

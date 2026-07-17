@@ -21,6 +21,7 @@ Full spec: [project.md](project.md)
 - **Guardrails** — prompt-injection sanitizer pre-chunking + a groundedness judge that drops claims the cited page doesn't support
 - **Multi-provider LLM chain** — one NVIDIA NIM key drives a quality-first fallback chain (GLM-5.2 → DeepSeek-V4-Pro → Nemotron-3-Ultra → Mistral-Medium-3.5), with Gemini/Groq on separate keys as deep rate-limit insurance; automatic failover + circuit breaker + usage accounting
 - **MCP server** — the analyzer is exposed over the Model Context Protocol (stdio), so any MCP client (Claude Desktop, Claude Code, an IDE) can call `analyze_first_impression` / `ask_ingested` as native tools — the same pipeline the HTTP API serves, no drift
+- **Observability** — optional Langfuse tracing: each report is one span tree with every LLM call nested as a generation (model, token usage, latency). A hard no-op without keys, so nothing is paid for until you opt in
 - **Eval harness** — retrieval precision/recall evals over a curated dataset with configurable relevance-threshold tuning
 
 ---
@@ -80,6 +81,8 @@ POST /analyze/stream               # SSE: full ingest → report as live agent-s
 | JS rendering | Playwright (headless Chromium), lazy fallback |
 | HTML extraction | `trafilatura` |
 | Config | `pydantic-settings` + `.env` |
+| Agent tool interface | MCP server (`mcp`, stdio) |
+| Observability | Langfuse traces (optional) |
 | Containerization | Docker + Docker Compose |
 
 ---
@@ -143,6 +146,8 @@ Copy `.env.example` to `.env` and set the values:
 | `GEMINI_SECONDACC_API_KEY` | Optional | — | 2nd Google account → 2× Gemini fallback headroom |
 | `GROQ_API_KEY` | Optional | — | Deep fallback — [console.groq.com](https://console.groq.com) |
 | `ANTHROPIC_API_KEY` | When `LLM_PROVIDER=anthropic` | — | Anthropic key (for `/ask` only) |
+| `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | Optional | — | Both set → report runs are traced to Langfuse ([cloud.langfuse.com](https://cloud.langfuse.com)); absent → tracing is a no-op |
+| `LANGFUSE_HOST` | — | `https://cloud.langfuse.com` | Set to `https://us.cloud.langfuse.com` for the US region |
 | `EMBEDDING_MODEL` | — | `voyage-3.5` | Voyage embedding model |
 | `MIN_RELEVANCE` | — | `0.45` | Reranker score threshold below which answers are refused |
 
@@ -164,7 +169,13 @@ uv run pytest
 docker compose up --build
 ```
 
-The compose file mounts `.env` automatically — no extra config needed.
+The compose file mounts `.env` automatically — no extra config needed. The image installs headless Chromium so JS-rendered sites work in-container, and the ChromaDB vector store lives on a named volume (`chroma_data`) so ingested content survives restarts. A `/health` healthcheck gates the container.
+
+---
+
+## Observability (optional)
+
+Set `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY` (free project at [cloud.langfuse.com](https://cloud.langfuse.com)) and every report run is traced: one span per run, each LLM call nested as a generation with model, token usage, and latency — so "which model actually answered", "how many tokens", and "where did the 3 minutes go" are answerable at a glance. Without the keys, tracing is a hard no-op ([app/observability.py](app/observability.py)) — no account or config required to run the app.
 
 ---
 
@@ -241,7 +252,7 @@ uv run python evals/debug_retrieval.py
 | 5 | ✅ | Guardrails: groundedness judge (LLM-as-judge) + prompt-injection sanitizer |
 | 6 | ✅ | Playwright JS rendering, streaming `/analyze/stream` dashboard, multi-provider pool (circuit breaker + usage accounting), evidence-floor guard |
 | 7 | ✅ | Custom MCP server (`app/mcp_server.py`) exposing the analyzer as stdio tools |
-| 8 | 🔜 | Observability (Langfuse traces), finalize Docker deployment |
+| 8 | ✅ | Observability (optional Langfuse traces), finalized Docker deployment (Chromium in-image + persisted vector store) |
 
 ---
 
