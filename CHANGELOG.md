@@ -2,6 +2,18 @@
 
 Reverse order (newest first). For learning + interview recall.
 
+## Finalized model chain — NVIDIA quality-first, robustness, cleanup
+
+**(this commit) — GLM-led NVIDIA chain + refuse-on-empty + Cerebras retired**
+- MODEL SELECTION: benchmarked candidates on a real full report (floworks) scored on a weighted rubric (completeness / grounding / structure / actionability / citations) and cross-checked vs Artificial Analysis. Key lesson: AA's *generic* intelligence disagrees with THIS task — gpt-oss-120b is AA-last but did fine here; Mistral-Medium won our task but is AA-low. GLM-5.2 is the rare model both rank top. DeepSeek-V4-Flash DISQUALIFIED — it hallucinated a *Stripe* report from empty evidence.
+- FINALIZED CHAIN (one NVIDIA NIM key, quality > speed): `GLM-5.2 → DeepSeek-V4-Pro → Nemotron-3-Ultra → Mistral-Medium-3.5`, then Gemini/Groq (different keys = real rate-limit insurance; the four NVIDIA models share one account quota). `pool_prefer="glm"`.
+- TOOL-GATE: DeepSeek-V4-Pro fails tool-calling → `llm_pool._NO_TOOLS` drops it from the order when `tools=` is passed (explore), so the loop never falls onto it. Persona/judge/synthesis (no tools) use the full order.
+- SYNTHESIS: primary path now the NVIDIA chain via OpenAI-compat JSON (`_synthesize_via_pool`, Pydantic-validated); native Gemini `response_schema` kept as the fallback.
+- REFUSE ON EMPTY EVIDENCE: `generate_report` raises `InsufficientEvidenceError` (→ HTTP 409) when the store holds <200 chars — a robots-blocked or dead crawl can no longer be turned into a hallucinated report (found live: drdroid.io disallows crawling, yet models still "produced" a report from nothing).
+- POOL HARDENING (earlier commits, now standard): circuit breaker (daily-429 → 15-min cooldown, transient → 60s; killed the 29-call retry storms), per-call usage accounting (`get_usage`), retry on 5xx + blank-200 completions, exponential backoff on hintless 429s, Gemini `_gemini_safe` (thought_signature flattening for Gemini-3-gen tool history).
+- CLEANUP: retired Cerebras entirely (config + llm_pool + tests — superseded by the NVIDIA chain); removed unused Exa/Kimi/Qwen keys from `.env`; rewrote `.env.example` to the real key set; removed stale `HANDOFF.md` (continuity now in project.md + agent memory).
+- 63 tests, lint clean. Live-verified: GLM serves, DeepSeek-Pro correctly skipped on tool calls, embeddings A/B shows `nemotron-3-embed-1b` matches Voyage (queued to replace it).
+
 ## Scale — dual-provider pool (20 reports/day)
 
 **(this commit) — llm_pool: Groq + Cerebras failover; Gemini reserved for synthesis**

@@ -89,7 +89,8 @@ def explore() -> tuple[list, list[dict]]:
 
     Called by: generate() below AND agent/panel.py (Phase 4) — the panel
     reuses this exact exploration so evidence is gathered ONCE per report.
-    Runs on llm_pool (prefer Groq, fail over to Cerebras on daily quota).
+    Runs on llm_pool (the finalized GLM-led chain; DeepSeek-Pro auto-skipped
+    here because explore passes tools=).
     """
     messages: list = [
         {"role": "system", "content": prompts.EXPLORE_SYSTEM},

@@ -54,7 +54,7 @@ def _explore_node(state: PanelState) -> dict:
 
 def _judge_as(persona: dict, evidence: str) -> PersonaImpression:
     """One persona's verdict over the shared evidence: JSON-mode reply via the
-    provider pool (prefer CEREBRAS — keeps Groq's daily budget for explore),
+    provider pool (prefer = settings.pool_prefer, the GLM-led NVIDIA chain),
     validated into PersonaImpression (retried once on malformed JSON)."""
     last_error: Exception = ValueError("no attempt made")
     for _ in range(_PERSONA_RETRIES):

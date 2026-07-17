@@ -1,23 +1,22 @@
-# app/agent/llm_pool.py — one chat() over TWO free-tier providers (Groq +
-# Cerebras), with automatic failover.
+# app/agent/llm_pool.py — one chat() over a multi-provider failover chain.
 #
-# WHY: 20 cold-outreach reports/day don't fit inside ONE provider's free daily
-# token cap (Groq: 100K TPD — one heavy day of testing exhausted it). Both
-# providers speak the OpenAI chat.completions dialect, so a single call-site
-# can prefer one and fail over to the other:
+# WHY: no single free tier can carry the agent's bursty, many-call workload, and
+# any one model/provider can be down, throttled, or (for a given account) gated.
+# Every provider speaks the OpenAI chat.completions dialect, so one call-site can
+# prefer one and fail over down the chain:
 #   - per-MINUTE 429  → sleep the server's Retry-After, same provider
 #   - per-DAY 429     → sleeping won't help TODAY → switch provider immediately
+#     (and trip the circuit breaker so we stop re-probing it this run)
+#   - 5xx / blank completion → transient → retry then fail over
 #   - tool_use_failed 400 → stochastic malformed tool-call syntax → re-ask
 #
-# WHO PREFERS WHAT (spreads the load BY DESIGN, not just on failure):
-#   explore loop (groq_driver) → prefer "groq"     (proven tool-calling)
-#   personas + judge           → prefer "cerebras" (JSON verdicts; keeps the
-#                                                   explore budget on Groq)
-#   synthesis                  → Gemini, NOT here (response_schema quality;
-#                                                   1 call/report ≈ 20/day cap)
+# THE CHAIN (see _PROVIDERS): the finalized NVIDIA quality models first
+# (glm → dspro → nemo → mistral, one nvapi key), then Gemini/Groq as the deep
+# fallback on a DIFFERENT key (real rate-limit insurance — the NVIDIA models
+# share one account quota). Callers pass prefer=settings.pool_prefer ("glm").
 #
 # CALL FLOW:
-#   groq_driver.explore() / panel._judge_as() / judge.verify_groundedness()
+#   groq_driver.explore()/synthesize() / panel._judge_as() / judge.verify_groundedness()
 #     → chat(messages, prefer=..., tools=/response_format=...)
 
 import logging
@@ -53,8 +52,8 @@ _DAILY_MARKERS = ("per day", "tokens per day", "tpd", "rpd", "daily")
 # NVIDIA quality chain leads (all one nvapi- key, integrate.api.nvidia.com);
 # Gemini/Groq are the DEEP fallback (a DIFFERENT key = real rate-limit insurance,
 # since the four NVIDIA models share one account quota).
-#   glm → dspro → nemo → mistral  (NVIDIA)  then  gemini → gemini2 → groq → cerebras
-_PROVIDERS = ("glm", "dspro", "nemo", "mistral", "gemini", "gemini2", "groq", "cerebras")
+#   glm → dspro → nemo → mistral  (NVIDIA)  then  gemini → gemini2 → groq
+_PROVIDERS = ("glm", "dspro", "nemo", "mistral", "gemini", "gemini2", "groq")
 _NVIDIA_PROVIDERS = ("glm", "dspro", "nemo", "mistral")
 _GEMINI_PROVIDERS = ("gemini", "gemini2")  # need history-flattening + model override
 # DeepSeek-V4-Pro fails tool-calling (verified) — skip it when tools are wanted
@@ -72,8 +71,6 @@ def _provider_key(provider: str) -> str:
     both _client and the key-presence filter in chat)."""
     if provider == "groq":
         return settings.groq_api_key
-    if provider == "cerebras":
-        return settings.cerebras_api_key
     if provider == "gemini":
         return settings.gemini_api_key  # account 1
     if provider == "gemini2":
@@ -92,9 +89,7 @@ def _client(provider: str):
         return openai.OpenAI(base_url=_GEMINI_OPENAI_BASE, api_key=_provider_key(provider))
     if provider in _NVIDIA_PROVIDERS:
         return openai.OpenAI(base_url=_NVIDIA_BASE, api_key=settings.nvidia_api_key)
-    return openai.OpenAI(
-        base_url="https://api.cerebras.ai/v1", api_key=settings.cerebras_api_key
-    )
+    raise ValueError(f"unknown provider: {provider}")
 
 
 def _gemini_safe(messages: list) -> list:
@@ -138,7 +133,7 @@ def _model(provider: str) -> str:
         return settings.gemini_pool_model
     if provider in _NVIDIA_PROVIDERS:
         return getattr(settings, _NVIDIA_MODEL_ATTR[provider])
-    return settings.cerebras_model
+    raise ValueError(f"unknown provider: {provider}")
 
 
 def _retry_after_seconds(exc: Exception) -> float:

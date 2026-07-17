@@ -12,12 +12,12 @@ from app.schemas import FirstImpressionReport, Observation
 def _fresh_pool_state(monkeypatch):
     """The circuit breaker + usage counters are module-global. Clear them before
     each test so one test tripping a provider can't skip it in the next. Also
-    blank the two Gemini-account keys by default — they load from real .env
-    otherwise and would leak into the Groq/Cerebras failover assertions; tests
-    that exercise Gemini set them explicitly."""
+    blank EVERY provider key by default — they load from real .env otherwise and
+    leak into the failover assertions; each pool test sets exactly the keys it
+    exercises."""
     llm_pool.reset_usage()
-    monkeypatch.setattr(llm_pool.settings, "gemini_api_key", "")
-    monkeypatch.setattr(llm_pool.settings, "gemini_secondacc_api_key", "")
+    for key in ("nvidia_api_key", "gemini_api_key", "gemini_secondacc_api_key", "groq_api_key"):
+        monkeypatch.setattr(llm_pool.settings, key, "")
     yield
     llm_pool.reset_usage()
 
@@ -161,23 +161,23 @@ def test_pool_fails_over_on_daily_quota(monkeypatch):
                         body=None,
                     )
 
-    class FakeCerebras:
+    class FakeAlt:
         class chat:
             class completions:
                 @staticmethod
                 def create(**k):
-                    calls.append("cerebras")
+                    calls.append("alt")
                     return FakeResp()
 
     monkeypatch.setattr(llm_pool.settings, "groq_api_key", "k1")
-    monkeypatch.setattr(llm_pool.settings, "cerebras_api_key", "k2")
+    monkeypatch.setattr(llm_pool.settings, "gemini_api_key", "k2")
     monkeypatch.setattr(
-        llm_pool, "_client", lambda p: FakeGroq() if p == "groq" else FakeCerebras()
+        llm_pool, "_client", lambda p: FakeGroq() if p == "groq" else FakeAlt()
     )
 
     msg = llm_pool.chat([{"role": "user", "content": "hi"}], prefer="groq")
     assert msg.content == "ok"
-    assert calls == ["groq", "cerebras"]  # daily 429 → instant failover
+    assert calls == ["groq", "alt"]  # daily 429 → instant failover to next provider
 
 
 def test_circuit_breaker_skips_dead_provider(monkeypatch):
@@ -214,7 +214,6 @@ def test_circuit_breaker_skips_dead_provider(monkeypatch):
                     return FakeResp()
 
     monkeypatch.setattr(llm_pool.settings, "groq_api_key", "k")
-    monkeypatch.setattr(llm_pool.settings, "cerebras_api_key", "")
     monkeypatch.setattr(llm_pool.settings, "gemini_api_key", "k")
     monkeypatch.setattr(llm_pool, "_client",
                         lambda p: FakeGroq() if p == "groq" else FakeGemini())
@@ -257,7 +256,6 @@ def test_pool_retries_transient_5xx_then_succeeds(monkeypatch):
                     return FakeResp()
 
     monkeypatch.setattr(llm_pool.settings, "groq_api_key", "k1")
-    monkeypatch.setattr(llm_pool.settings, "cerebras_api_key", "")
     monkeypatch.setattr(llm_pool, "_client", lambda p: FakeGroq())
     monkeypatch.setattr(llm_pool.time, "sleep", lambda s: None)  # no real backoff wait
 
@@ -292,7 +290,6 @@ def test_pool_retries_empty_completion(monkeypatch):
                     return r
 
     monkeypatch.setattr(llm_pool.settings, "groq_api_key", "k1")
-    monkeypatch.setattr(llm_pool.settings, "cerebras_api_key", "")
     monkeypatch.setattr(llm_pool, "_client", lambda p: FakeClient())
     monkeypatch.setattr(llm_pool.time, "sleep", lambda s: None)
 
@@ -317,7 +314,6 @@ def test_pool_allows_empty_content_with_tool_calls(monkeypatch):
                     return r
 
     monkeypatch.setattr(llm_pool.settings, "groq_api_key", "k1")
-    monkeypatch.setattr(llm_pool.settings, "cerebras_api_key", "")
     monkeypatch.setattr(llm_pool, "_client", lambda p: FakeClient())
 
     out = llm_pool.chat([{"role": "user", "content": "hi"}], prefer="groq")
@@ -333,7 +329,7 @@ def test_pool_skips_providers_without_keys(monkeypatch):
     class FakeResp:
         choices = [type("C", (), {"message": FakeMsg()})()]
 
-    class FakeCerebras:
+    class FakeGemini:
         class chat:
             class completions:
                 @staticmethod
@@ -341,8 +337,8 @@ def test_pool_skips_providers_without_keys(monkeypatch):
                     return FakeResp()
 
     monkeypatch.setattr(llm_pool.settings, "groq_api_key", "")  # no groq key
-    monkeypatch.setattr(llm_pool.settings, "cerebras_api_key", "k2")
-    monkeypatch.setattr(llm_pool, "_client", lambda p: FakeCerebras())
+    monkeypatch.setattr(llm_pool.settings, "gemini_api_key", "k2")
+    monkeypatch.setattr(llm_pool, "_client", lambda p: FakeGemini())
 
     msg = llm_pool.chat([{"role": "user", "content": "hi"}], prefer="groq")
-    assert msg.content == "ok"  # went straight to cerebras
+    assert msg.content == "ok"  # groq keyless → skipped → served by next provider

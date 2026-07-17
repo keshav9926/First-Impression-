@@ -14,8 +14,12 @@ Full spec: [project.md](project.md)
 - **Hybrid retrieval** — dense vector search (Voyage AI) + BM25 keyword search fused via Reciprocal Rank Fusion (RRF), reranked by a cross-encoder
 - **Relevance gate** — refuses to answer if no retrieved chunk clears a calibrated relevance threshold (fail-closed, not fail-open)
 - **ReAct analysis agent** — explores the ingested knowledge base with tools (`list_pages`, `read_page`, `search_content`) before synthesizing a report
+- **Persona panel** — three distinct visitors (technical evaluator / business buyer / first-time user) judge the same evidence in parallel (LangGraph fan-out), so the report shows *who* bounces *where*
 - **Structured, grounded output** — `FirstImpressionReport` Pydantic schema enforces citations structurally (not just via prompt); every `Observation` requires a `source_url`
-- **Multi-provider LLM support** — Gemini (default, free tier) or Groq for the agent; Gemini or Anthropic Claude for Q&A
+- **Refuses on empty evidence** — a report is never fabricated from an empty/near-empty store (robots-blocked or dead crawl → HTTP 409, not a hallucinated report)
+- **JS-site rendering** — static crawl escalates to a headless Playwright render when extraction is thin, so Framer/Webflow/SPA sites are readable
+- **Guardrails** — prompt-injection sanitizer pre-chunking + a groundedness judge that drops claims the cited page doesn't support
+- **Multi-provider LLM chain** — one NVIDIA NIM key drives a quality-first fallback chain (GLM-5.2 → DeepSeek-V4-Pro → Nemotron-3-Ultra → Mistral-Medium-3.5), with Gemini/Groq on separate keys as deep rate-limit insurance; automatic failover + circuit breaker + usage accounting
 - **Eval harness** — retrieval precision/recall evals over a curated dataset with configurable relevance-threshold tuning
 
 ---
@@ -48,9 +52,14 @@ POST /ask
       └── relevance gate           # score < min_relevance → honest refusal
           └── qa.answer()          # LLM (Gemini / Anthropic) answers from chunks only
 
-POST /report
-  └── agent/react.py               # ReAct loop (list_pages / read_page / search_content)
-      └── agent/report.py          # synthesis → FirstImpressionReport (structured output)
+POST /report                       # ?panel=true → persona panel
+  └── report.generate_report()     # refuses (409) if the store is empty/thin
+      └── explore ONCE (tools)      # llm_pool: GLM → Nemotron → Mistral (DeepSeek-Pro skipped: no tools)
+          └── panel (LangGraph)     # 3 personas judge the same evidence in parallel
+              └── synthesize        # GLM → … → Gemini → FirstImpressionReport
+                  └── apply_guards  # citation verify + groundedness judge + thin-crawl caveat
+
+POST /analyze/stream               # SSE: full ingest → report as live agent-step events
 ```
 
 ---
@@ -64,8 +73,10 @@ POST /report
 | Vector store | ChromaDB |
 | Keyword search | BM25 (`rank-bm25`) |
 | Reranking | Voyage AI reranker |
-| LLM — Q&A | Gemini 2.5 Flash / Claude (Anthropic) |
-| LLM — Agent | Gemini 2.5 Flash / Groq (`llama-3.3-70b-versatile`) |
+| LLM — Agent (explore / persona / synthesis) | NVIDIA NIM chain: GLM-5.2 → DeepSeek-V4-Pro → Nemotron-3-Ultra → Mistral-Medium-3.5 |
+| LLM — deep fallback | Gemini (`gemini-3.1-flash-lite` / `gemini-3-flash-preview`), Groq |
+| LLM — Q&A (`/ask`) | Groq (default) / Gemini / Claude |
+| JS rendering | Playwright (headless Chromium), lazy fallback |
 | HTML extraction | `trafilatura` |
 | Config | `pydantic-settings` + `.env` |
 | Containerization | Docker + Docker Compose |
@@ -90,7 +101,7 @@ uv sync
 
 # 3. Configure environment
 copy .env.example .env
-# → open .env and fill in at minimum: VOYAGE_API_KEY + GEMINI_API_KEY
+# → open .env and fill in at minimum: VOYAGE_API_KEY + NVIDIA_API_KEY
 
 # 4. Start the dev server
 uv run uvicorn app.main:app --reload
@@ -125,18 +136,16 @@ Copy `.env.example` to `.env` and set the values:
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `VOYAGE_API_KEY` | ✅ | — | Voyage AI key — free tier at [dashboard.voyageai.com](https://dashboard.voyageai.com) |
-| `GEMINI_API_KEY` | ✅ (default) | — | Google AI Studio key — free tier at [aistudio.google.com](https://aistudio.google.com) |
-| `ANTHROPIC_API_KEY` | When `LLM_PROVIDER=anthropic` | — | Anthropic key |
-| `GROQ_API_KEY` | When `AGENT_PROVIDER=groq` | — | Groq key — free tier at [console.groq.com](https://console.groq.com) |
-| `LLM_PROVIDER` | — | `gemini` | `gemini` or `anthropic` for `/ask` |
-| `AGENT_PROVIDER` | — | `gemini` | `gemini` or `groq` for `/report` agent |
-| `GEMINI_MODEL` | — | `gemini-2.5-flash` | Model for `/ask` |
-| `GEMINI_AGENT_MODEL` | — | `gemini-2.5-flash` | Model for `/report` agent |
+| `VOYAGE_API_KEY` | ✅ | — | Voyage AI embeddings — free tier at [dashboard.voyageai.com](https://dashboard.voyageai.com) |
+| `NVIDIA_API_KEY` | ✅ | — | NVIDIA NIM — drives the whole agent chain (GLM-5.2 → DeepSeek → Nemotron → Mistral); free endpoints at [build.nvidia.com](https://build.nvidia.com) |
+| `GEMINI_API_KEY` | Recommended | — | Deep fallback + native synthesis — [aistudio.google.com](https://aistudio.google.com) |
+| `GEMINI_SECONDACC_API_KEY` | Optional | — | 2nd Google account → 2× Gemini fallback headroom |
+| `GROQ_API_KEY` | Optional | — | Deep fallback — [console.groq.com](https://console.groq.com) |
+| `ANTHROPIC_API_KEY` | When `LLM_PROVIDER=anthropic` | — | Anthropic key (for `/ask` only) |
 | `EMBEDDING_MODEL` | — | `voyage-3.5` | Voyage embedding model |
 | `MIN_RELEVANCE` | — | `0.45` | Reranker score threshold below which answers are refused |
 
-> **Free-tier tip:** Groq is recommended for `AGENT_PROVIDER` on free tier — its rate limits handle the agent's many calls far better than Gemini's ~20 RPD free quota.
+> **Why one NVIDIA key for four models:** they're all free NVIDIA NIM endpoints on `integrate.api.nvidia.com`, so a single key fails over across GLM → DeepSeek-Pro → Nemotron → Mistral. Because they share one account quota, Gemini/Groq (different keys) stay as the real rate-limit insurance.
 
 ---
 
@@ -192,9 +201,9 @@ uv run python evals/debug_retrieval.py
 | 1 | ✅ | Public content ingestion, chunking, embeddings, ChromaDB, plain RAG Q&A |
 | 2 | ✅ | Hybrid search (BM25 + vectors + RRF), reranking, relevance gate, retrieval evals |
 | 3 | ✅ | ReAct analysis agent → structured `FirstImpressionReport` with citations |
-| 4 | 🔜 | Multi-agent crew (researcher / user-sim / evaluator / skeptic) via LangGraph |
-| 5 | 🔜 | Evals + guardrails: groundedness check (LLM-as-judge + RAGAS), prompt-injection filter |
-| 6 | 🔜 | FastAPI streaming endpoint + live agent-step dashboard |
+| 4 | ✅ | Persona panel (technical / business / first-time) via LangGraph fan-out |
+| 5 | ✅ | Guardrails: groundedness judge (LLM-as-judge) + prompt-injection sanitizer |
+| 6 | ✅ | Playwright JS rendering, streaming `/analyze/stream` dashboard, multi-provider pool (circuit breaker + usage accounting), evidence-floor guard |
 | 7 | 🔜 | Custom MCP server exposing the analyzer as a tool |
 | 8 | 🔜 | Observability (Langfuse traces), finalize Docker deployment |
 

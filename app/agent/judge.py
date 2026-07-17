@@ -133,8 +133,7 @@ def verify_groundedness(report: FirstImpressionReport) -> FirstImpressionReport:
     prompt = f"{_JUDGE_INSTRUCTION}\n\nCLAIMS:\n{claims_block}\n\n{pages_block}"
 
     try:
-        # Pool (prefer Cerebras) instead of Gemini: keeps Gemini's tiny daily
-        # quota exclusively for synthesis — 1 Gemini call per report ≈ 20/day.
+        # Pool with the finalized chain (prefer = settings.pool_prefer, GLM-led).
         message = llm_pool.chat(
             [
                 {
