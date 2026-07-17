@@ -175,7 +175,12 @@ The compose file mounts `.env` automatically — no extra config needed. The ima
 
 ## Observability (optional)
 
-Set `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY` (free project at [cloud.langfuse.com](https://cloud.langfuse.com)) and every report run is traced: one span per run, each LLM call nested as a generation with model, token usage, and latency — so "which model actually answered", "how many tokens", and "where did the 3 minutes go" are answerable at a glance. Without the keys, tracing is a hard no-op ([app/observability.py](app/observability.py)) — no account or config required to run the app.
+Set `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY` + `LANGFUSE_BASE_URL` (free project at [cloud.langfuse.com](https://cloud.langfuse.com)) and every report run is traced following Langfuse's [instrumentation best practices](https://github.com/langfuse/skills):
+
+- **LLM calls** are captured by the **Langfuse OpenAI drop-in** — model, token usage, cost, and latency are recorded automatically (no manual logging) for the whole NVIDIA/Gemini chain.
+- **Correct observation types**: the explore loop and each persona are `agent` observations (so they show as distinct nodes in Langfuse's Agent Graph), retrieval is a `retriever`, and the root span's input/output is the ingested pages → the finished report.
+
+So "which model actually answered", "how many tokens", "where did the 3 minutes go", and "which persona bounced" are answerable at a glance. Without the keys, tracing is a hard no-op ([app/observability.py](app/observability.py)) — no account or config required to run the app.
 
 ---
 

@@ -83,13 +83,19 @@ def _provider_key(provider: str) -> str:
 
 def _client(provider: str):
     """OpenAI-compatible client for a provider. All speak the same
-    .chat.completions.create surface, which is what makes this pool possible."""
+    .chat.completions.create surface, which is what makes this pool possible.
+
+    For the OpenAI-compat providers we instantiate whatever class observability
+    hands us — the Langfuse OpenAI drop-in when tracing is on (so every call is
+    auto-captured as a generation), else plain openai.OpenAI. Groq uses its own
+    SDK, so it is traced manually in chat() instead."""
     if provider == "groq":
         return groq.Groq(api_key=settings.groq_api_key)
+    openai_cls = observability.openai_client_class()
     if provider in _GEMINI_PROVIDERS:
-        return openai.OpenAI(base_url=_GEMINI_OPENAI_BASE, api_key=_provider_key(provider))
+        return openai_cls(base_url=_GEMINI_OPENAI_BASE, api_key=_provider_key(provider))
     if provider in _NVIDIA_PROVIDERS:
-        return openai.OpenAI(base_url=_NVIDIA_BASE, api_key=settings.nvidia_api_key)
+        return openai_cls(base_url=_NVIDIA_BASE, api_key=settings.nvidia_api_key)
     raise ValueError(f"unknown provider: {provider}")
 
 
@@ -209,13 +215,22 @@ def _live(order: list) -> list:
     return live or order
 
 
-def chat(messages: list, prefer: str = "groq", gemini_model: str | None = None, **kwargs):
+def chat(
+    messages: list,
+    prefer: str = "groq",
+    gemini_model: str | None = None,
+    label: str = "llm-call",
+    **kwargs,
+):
     """chat.completions.create with retry + cross-provider failover.
 
     Returns the response's .choices[0].message (same shape on both SDKs).
     kwargs pass through: tools=, tool_choice=, response_format=.
     gemini_model overrides settings.gemini_pool_model for the Gemini provider
     only (per-call model experiments; other providers keep their own model).
+    `label` names the Langfuse generation (e.g. "explore-step", "persona-judge",
+    "synthesize") — best practice: an active, stable name, model kept as its own
+    attribute. No-op when tracing is off.
     Raises the LAST provider's error only when ALL providers are exhausted.
     """
     # Caller's preferred provider first, then the rest of the chain (Gemini last
@@ -248,10 +263,17 @@ def chat(messages: list, prefer: str = "groq", gemini_model: str | None = None, 
         format_tries = 0
         server_tries = 0
         empty_tries = 0
+        # For the OpenAI drop-in (all providers except Groq) pass name/metadata
+        # so the auto-captured generation is well-named. Groq uses its own SDK
+        # which would reject these kwargs, so it's traced manually below instead.
+        create_kwargs = dict(kwargs)
+        if provider != "groq" and observability.enabled():
+            create_kwargs["name"] = label
+            create_kwargs["metadata"] = {"provider": provider, "role": label}
         while True:
             try:
                 response = client.chat.completions.create(
-                    model=model_name, messages=body, **kwargs
+                    model=model_name, messages=body, **create_kwargs
                 )
                 message = response.choices[0].message
                 # Empty completion guard: some models (seen on Cerebras
@@ -271,17 +293,18 @@ def chat(messages: list, prefer: str = "groq", gemini_model: str | None = None, 
                     time.sleep(min(2**empty_tries, 10))
                     continue
                 _tally(provider, model_name, "ok")
-                # Phase 8: log this successful call as a Langfuse generation
-                # (no-op unless tracing is configured). Nests under the active
-                # report_trace via OTEL context — one choke point for explore,
-                # personas, judge, and pool synthesis alike.
-                observability.record_generation(
-                    name=f"chat:{provider}",
-                    model=model_name,
-                    input=body,
-                    output=message.content,
-                    usage=getattr(response, "usage", None),
-                )
+                # OpenAI-compat providers are auto-traced by the langfuse.openai
+                # drop-in (see _client). Groq uses its own SDK the drop-in can't
+                # patch, so log it manually here (no-op unless tracing is on).
+                if provider == "groq":
+                    observability.record_generation(
+                        name=label,
+                        model=model_name,
+                        input=body,
+                        output=message.content,
+                        usage=getattr(response, "usage", None),
+                        metadata={"provider": provider},
+                    )
                 return message
             except (groq.InternalServerError, openai.InternalServerError) as exc:
                 # 5xx = the provider glitched (not our request). These are

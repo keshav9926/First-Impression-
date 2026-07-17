@@ -1,44 +1,58 @@
-# app/observability.py — Phase 8: optional Langfuse tracing.
+# app/observability.py — Phase 8: Langfuse tracing, following the official
+# Langfuse instrumentation best-practices (github.com/langfuse/skills).
 #
-# Same philosophy as events.py: a HARD no-op unless configured. If both
-# LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are set, each report run becomes
-# one Langfuse trace — a span tree with every LLM call nested as a generation
-# (model, prompt/completion, token usage, latency) — so "why did this report
-# take 3 minutes / which model actually answered / how many tokens" stops being
-# a mystery. Absent keys, every function here returns instantly and nothing is
-# imported from Langfuse at call time, so tests and key-less runs pay nothing.
+# Same philosophy as events.py: a HARD no-op unless configured. With both
+# LANGFUSE_* keys set, each report run is ONE trace — a span tree whose LLM
+# calls are captured as proper `generation` observations (model, tokens, cost,
+# latency) by the Langfuse OpenAI drop-in, with the persona subagents typed as
+# `agent` and retrieval typed as `retriever` so the trace reads correctly and
+# drives Langfuse's Agent Graph.
+#
+# WHY the drop-in over manual logging: Langfuse's baseline guidance is "prefer
+# framework integrations over manual instrumentation — they capture more context
+# with less code." Our OpenAI-compatible providers (NVIDIA GLM/DeepSeek/Nemotron/
+# Mistral + Gemini) all go through openai.OpenAI, so swapping that class for
+# langfuse.openai.OpenAI auto-instruments every generation. Only Groq (its own
+# SDK, deep fallback) is logged manually.
+#
+# ONE Langfuse client: we construct it here, which also registers it as the SDK
+# default singleton the drop-in resolves via get_client() — so the drop-in's
+# generations nest under the spans we open here (shared OpenTelemetry context).
 #
 # DESIGN RULES:
-#   1. Observability must NEVER break a report. Every Langfuse call is wrapped;
-#      an SDK/network error is swallowed (logged once), not raised to the user.
-#   2. ONE insertion point per concern: report_trace() wraps a whole run
-#      (report.generate_report), record_generation() logs one LLM call from the
-#      single choke point (llm_pool.chat + the native Gemini synthesis). New
-#      call sites need no plumbing — a generation created inside an active
-#      report_trace nests under it automatically via OpenTelemetry context.
+#   1. Observability must NEVER break a report — every Langfuse call is wrapped.
+#   2. Import Langfuse only AFTER config is loaded, and construct the client
+#      BEFORE any langfuse.openai client is built (drop-in patch order).
 #
 # CALL FLOW:
-#   report.generate_report()      → with report_trace(...) as trace: ...
-#   llm_pool.chat() (on success)  → record_generation(name, model, in, out, usage)
-#   groq_driver.synthesize()      → record_generation(...) for the native Gemini call
+#   report.generate_report()  → with report_trace(...) as trace: ...
+#   llm_pool._client()        → openai_client_class() (drop-in when enabled)
+#   llm_pool.chat()           → passes name=/metadata= so each generation is named
+#   panel persona node        → with span(name, as_type="agent"): ...
+#   rag.pipeline.retrieve()   → with span("retrieve-context", as_type="retriever")
 
 import logging
+import os
 from contextlib import contextmanager
 
 from app.config import settings
 
 logger = logging.getLogger("first_impression.observability")
 
-# Lazily-initialized Langfuse client. None = tracing disabled (no keys, or the
-# SDK failed to start). Guarded by _init() so import of this module is cheap and
-# never touches the network.
 _client = None
 _init_done = False
 
 
+def _resolve_host() -> str:
+    """LANGFUSE_BASE_URL (skill convention) wins over LANGFUSE_HOST (SDK
+    convention); default is the EU cloud."""
+    return settings.langfuse_base_url or settings.langfuse_host
+
+
 def _init() -> None:
-    """Create the Langfuse client once, iff both keys are configured. Any failure
-    leaves _client None (tracing disabled) — observability must not break boot."""
+    """Create the Langfuse client once, iff both keys are set. Registers it as
+    the SDK default so the OpenAI drop-in shares it. Any failure leaves tracing
+    disabled — observability must not break boot."""
     global _client, _init_done
     if _init_done:
         return
@@ -46,14 +60,18 @@ def _init() -> None:
     if not (settings.langfuse_public_key and settings.langfuse_secret_key):
         return  # not configured → stay a no-op
     try:
+        host = _resolve_host()
+        # Mirror the resolved host into the env the drop-in/get_client() read, so
+        # every code path agrees on the region even if only BASE_URL was set.
+        os.environ.setdefault("LANGFUSE_HOST", host)
         from langfuse import Langfuse
 
         _client = Langfuse(
             public_key=settings.langfuse_public_key,
             secret_key=settings.langfuse_secret_key,
-            host=settings.langfuse_host,
+            host=host,
         )
-        logger.info("Langfuse tracing enabled (host=%s)", settings.langfuse_host)
+        logger.info("Langfuse tracing enabled (host=%s)", host)
     except Exception:  # bad host, SDK import error, etc. — disable, don't crash
         logger.exception("Langfuse init failed — tracing disabled")
         _client = None
@@ -65,21 +83,34 @@ def enabled() -> bool:
     return _client is not None
 
 
+def openai_client_class():
+    """The OpenAI class to instantiate for OpenAI-compatible providers: the
+    Langfuse drop-in (auto-instruments generations) when tracing is on, else the
+    plain openai.OpenAI. Lazy import so key-less runs never import langfuse."""
+    if enabled():
+        try:
+            from langfuse.openai import OpenAI
+
+            return OpenAI
+        except Exception:
+            logger.exception("langfuse.openai unavailable — using plain OpenAI client")
+    import openai
+
+    return openai.OpenAI
+
+
 @contextmanager
-def report_trace(name: str = "first-impression-report", **metadata):
-    """Wrap a whole report run in one Langfuse span. LLM generations recorded
-    inside (via record_generation) nest under it automatically. Flushes on exit
-    so a short-lived request/CLI process actually ships its spans. No-op (yields
-    None) when tracing is disabled."""
+def report_trace(name: str = "analyze-first-impression", **metadata):
+    """Wrap a whole report run in one root span; LLM generations recorded inside
+    (drop-in or manual) nest under it. Flushes on exit so a short-lived request/
+    CLI process ships its spans. No-op (yields None) when tracing is disabled."""
     if not enabled():
         yield None
         return
-    span = None
     try:
-        span = _client.start_as_current_observation(
+        with _client.start_as_current_observation(
             name=name, as_type="span", metadata=metadata or None
-        )
-        with span as active:
+        ) as active:
             yield active
     except Exception:
         logger.exception("report_trace failed — continuing without tracing")
@@ -91,9 +122,30 @@ def report_trace(name: str = "first-impression-report", **metadata):
             logger.exception("Langfuse flush failed")
 
 
-def update_trace_io(*, output=None, input=None) -> None:
-    """Attach the run's input/output to the active trace span (e.g. the ingested
-    URL and the finished report's headline). No-op if disabled."""
+@contextmanager
+def span(name: str, as_type: str = "span", input=None, metadata=None):
+    """A nested observation of a specific type — `agent` for a subagent,
+    `retriever` for a lookup, `tool` for a tool call, `span` for a plain step.
+    Becomes the current observation so generations inside nest under it. Yields
+    the observation (or None) so the caller can set .update(output=...). Never
+    raises."""
+    if not enabled():
+        yield None
+        return
+    try:
+        with _client.start_as_current_observation(
+            name=name, as_type=as_type, input=input, metadata=metadata
+        ) as obs:
+            yield obs
+    except Exception:
+        logger.exception("span %s failed — continuing", name)
+        yield None
+
+
+def update_trace_io(*, input=None, output=None) -> None:
+    """Attach meaningful input/output to the CURRENT span (best practice: the
+    root's I/O becomes the trace's I/O — set it to what a reviewer needs, not raw
+    args). No-op if disabled."""
     if not enabled():
         return
     try:
@@ -108,9 +160,10 @@ def update_trace_io(*, output=None, input=None) -> None:
 def record_generation(
     *, name: str, model: str, input, output, usage=None, metadata=None
 ) -> None:
-    """Log one completed LLM call as a leaf generation under the active trace.
-    `usage` is an OpenAI-style usage object (prompt_tokens/completion_tokens/
-    total_tokens) or None. Never raises — observability can't break a report."""
+    """Manually log one completed LLM call as a leaf generation under the active
+    trace. Used ONLY for providers the OpenAI drop-in cannot patch (Groq; the
+    native google-genai synthesis) — OpenAI-compatible calls are auto-traced by
+    the drop-in. Never raises."""
     if not enabled():
         return
     try:

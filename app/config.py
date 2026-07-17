@@ -126,7 +126,12 @@ class Settings(BaseSettings):
     # set LANGFUSE_HOST=https://us.cloud.langfuse.com for the US region).
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
+    # The Langfuse SDK/CLI convention is LANGFUSE_HOST, but the official skill's
+    # env template uses LANGFUSE_BASE_URL — accept BOTH so a .env written either
+    # way just works (base_url wins when set). EU cloud by default; US region is
+    # https://us.cloud.langfuse.com.
     langfuse_host: str = "https://cloud.langfuse.com"
+    langfuse_base_url: str = ""
 
     # --- Embeddings (Voyage AI) — used by embeddings.py ---
     voyage_api_key: str = ""

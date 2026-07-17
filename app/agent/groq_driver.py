@@ -60,6 +60,7 @@ def _synthesize_via_pool(synthesis_prompt: str) -> FirstImpressionReport | None:
              {"role": "user", "content": synthesis_prompt}],
             prefer=settings.pool_prefer,
             response_format={"type": "json_object"},
+            label="synthesize",
         )
     except Exception:
         return None  # whole NVIDIA chain unavailable → Gemini fallback
@@ -99,49 +100,58 @@ def explore() -> tuple[list, list[dict]]:
     steps_log: list[dict] = []
     seen_calls: set = set()  # repeat-call guard (see tools.repeat_call_reminder)
 
-    for _ in range(settings.agent_max_steps):
-        message = llm_pool.chat(
-            messages,
-            prefer=settings.pool_prefer,
-            tools=tools.OPENAI_TOOLS,
-            tool_choice="auto",
-        )
+    # Trace the ReAct loop as an `agent` observation — its generations
+    # (explore-step) and the retriever/tool calls it triggers nest under it.
+    with observability.span("explore", as_type="agent"):
+        for _ in range(settings.agent_max_steps):
+            message = llm_pool.chat(
+                messages,
+                prefer=settings.pool_prefer,
+                tools=tools.OPENAI_TOOLS,
+                tool_choice="auto",
+                label="explore-step",
+            )
 
-        if not message.tool_calls:
-            # Model produced text instead of a tool call = done exploring.
-            messages.append({"role": "assistant", "content": message.content or ""})
-            break
+            if not message.tool_calls:
+                # Model produced text instead of a tool call = done exploring.
+                messages.append({"role": "assistant", "content": message.content or ""})
+                break
 
-        # Record the assistant's tool-call turn (must precede the tool results).
-        messages.append(
-            {
-                "role": "assistant",
-                "content": message.content or "",
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {"name": tc.function.name, "arguments": tc.function.arguments},
-                    }
-                    for tc in message.tool_calls
-                ],
-            }
-        )
+            # Record the assistant's tool-call turn (must precede the results).
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": message.content or "",
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in message.tool_calls
+                    ],
+                }
+            )
 
-        # Execute each call; return one tool message per call.
-        for tc in message.tool_calls:
-            # `or {}` twice: arguments may be "" (falsy) OR the string "null"
-            # (json.loads → None) — both must become an empty dict, or
-            # args.get(...) in execute_tool would crash on None.
-            args = (json.loads(tc.function.arguments) if tc.function.arguments else {}) or {}
-            # Repeat-call guard: identical (tool, args) → short reminder
-            # instead of re-executing (result already in history).
-            observation = tools.repeat_call_reminder(
-                tc.function.name, args, seen_calls
-            ) or tools.execute_tool(tc.function.name, args)
-            steps_log.append({"tool": tc.function.name, "args": args})
-            events.emit("tool", name=tc.function.name, args=args)
-            messages.append({"role": "tool", "tool_call_id": tc.id, "content": observation})
+            # Execute each call; return one tool message per call.
+            for tc in message.tool_calls:
+                # `or {}` twice: arguments may be "" (falsy) OR the string "null"
+                # (json.loads → None) — both must become an empty dict, or
+                # args.get(...) in execute_tool would crash on None.
+                args = (json.loads(tc.function.arguments) if tc.function.arguments else {}) or {}
+                # Repeat-call guard: identical (tool, args) → short reminder
+                # instead of re-executing (result already in history).
+                observation = tools.repeat_call_reminder(
+                    tc.function.name, args, seen_calls
+                ) or tools.execute_tool(tc.function.name, args)
+                steps_log.append({"tool": tc.function.name, "args": args})
+                events.emit("tool", name=tc.function.name, args=args)
+                messages.append(
+                    {"role": "tool", "tool_call_id": tc.id, "content": observation}
+                )
 
     return messages, steps_log
 

@@ -27,7 +27,7 @@ from typing import Annotated, TypedDict
 
 import pydantic
 
-from app import events
+from app import events, observability
 from app.agent import groq_driver, llm_pool, personas
 from app.config import settings
 from app.schemas import FirstImpressionReport, PersonaImpression
@@ -65,6 +65,7 @@ def _judge_as(persona: dict, evidence: str) -> PersonaImpression:
             ],
             prefer=settings.pool_prefer,
             response_format={"type": "json_object"},
+            label="persona-judge",
         )
         try:
             return PersonaImpression.model_validate(json.loads(message.content or ""))
@@ -77,7 +78,19 @@ def _make_persona_node(persona: dict):
     """Build one graph node for one persona (closure carries the definition)."""
 
     def node(state: PanelState) -> dict:
-        impression = _judge_as(persona, state["evidence"])
+        # Each persona is a distinct subagent → an `agent` observation, named per
+        # persona so it's a distinguishable node in Langfuse's Agent Graph. Its
+        # judge generation nests under it.
+        name = persona.get("name") or persona["key"]
+        with observability.span(f"persona:{name}", as_type="agent") as obs:
+            impression = _judge_as(persona, state["evidence"])
+            if obs:
+                obs.update(
+                    output={
+                        "would_sign_up": impression.would_sign_up,
+                        "reason": impression.reason,
+                    }
+                )
         events.emit(
             "persona",
             persona=impression.persona,

@@ -118,6 +118,45 @@ def test_usage_dict_tolerates_none():
     assert observability._usage_dict(None) is None
 
 
+# ----- observation typing contract (best-practice: correct as_type) -----
+
+
+def test_span_forwards_type_and_io(monkeypatch):
+    """span() must forward as_type + input so retrieval is typed `retriever` and
+    personas `agent` (drives the Agent Graph), and let the caller set output."""
+    fake = _enable(monkeypatch)
+    with observability.span("retrieve-context", as_type="retriever", input="q") as s:
+        s.update(output=[{"url": "/", "relevance": 0.9}])
+    obs = [e for e in fake.log if isinstance(e, tuple) and e[0] == "span"]
+    assert obs[0][1]["as_type"] == "retriever"
+    assert obs[0][1]["input"] == "q"
+    updates = [e for e in fake.log if isinstance(e, tuple) and e[0] == "update"]
+    assert updates[0][1]["output"] == [{"url": "/", "relevance": 0.9}]
+
+
+def test_agent_span_type(monkeypatch):
+    fake = _enable(monkeypatch)
+    with observability.span("persona:Technical Evaluator", as_type="agent"):
+        pass
+    obs = [e for e in fake.log if isinstance(e, tuple) and e[0] == "span"]
+    assert obs[0][1]["as_type"] == "agent"
+    assert obs[0][1]["name"] == "persona:Technical Evaluator"
+
+
+def test_span_noop_when_disabled(monkeypatch):
+    monkeypatch.setattr(observability.settings, "langfuse_public_key", "")
+    monkeypatch.setattr(observability.settings, "langfuse_secret_key", "")
+    with observability.span("x", as_type="agent") as s:
+        assert s is None  # nothing created, caller's `if s:` guard short-circuits
+
+
+def test_base_url_beats_host(monkeypatch):
+    """LANGFUSE_BASE_URL (skill convention) must win over LANGFUSE_HOST."""
+    monkeypatch.setattr(observability.settings, "langfuse_host", "https://cloud.langfuse.com")
+    monkeypatch.setattr(observability.settings, "langfuse_base_url", "https://us.cloud.langfuse.com")
+    assert observability._resolve_host() == "https://us.cloud.langfuse.com"
+
+
 # ----- never raises into a report -----
 
 

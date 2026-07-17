@@ -2,6 +2,17 @@
 
 Reverse order (newest first). For learning + interview recall.
 
+## Phase 8.1 — Langfuse best-practice integration (skill-guided)
+
+**(this commit) — reworked tracing to follow the official Langfuse instrumentation skill**
+- Installed the Langfuse AI skill (github.com/langfuse/skills → `.claude/skills/langfuse`, gitignored) and followed its docs-first workflow + `references/instrumentation.md` baseline.
+- KEY SHIFT: replaced manual per-call generation logging with the **Langfuse OpenAI drop-in** (`langfuse.openai`), the skill's "prefer framework integration over manual instrumentation" rule. `llm_pool._client` now instantiates whatever `observability.openai_client_class()` returns — the drop-in when tracing is on (auto-captures model/tokens/cost/latency as a `generation`), else plain `openai.OpenAI`. Only Groq (own SDK, deep fallback) is still logged manually.
+- CORRECT OBSERVATION TYPES (drives the Agent Graph): the ReAct explore loop and each persona are `agent` observations (personas named distinctly, `persona:<name>`); `rag.pipeline.retrieve` is a `retriever` with query in / ranked hits out; the root run is a `span` whose input/output is pages → finished report. Generations carry stable, active names via a new `llm_pool.chat(label=...)` arg (`explore-step`, `persona-judge`, `synthesize`, `groundedness-judge`) — model kept as its own attribute, per best practice.
+- ONE shared client: `observability` constructs the Langfuse singleton so the drop-in resolves the same client via `get_client()` → generations nest under our spans through OTel context.
+- ENV RECONCILE: accept `LANGFUSE_BASE_URL` (skill convention) as well as `LANGFUSE_HOST` (SDK); base_url wins.
+- TEST SAFETY: new `tests/conftest.py` blanks LANGFUSE keys + resets the client before every test, so the real `.env` keys can't ship traces mid-suite. +4 structural tests (observation typing, base_url precedence, disabled no-op) → 82 tests, lint clean.
+- NOT YET DONE (env blocker): the skill's step 3 — run end-to-end, fetch the trace, self-audit against the live best-practices page — needs outbound network the build sandbox lacks (DNS refused). Verified offline instead: enabled path constructs client + drop-in, span tree builds with correct types, no-op + never-raises hold. Live trace + `langfuse-cli` audit handed to the user to run on a networked machine.
+
 ## Phase 8 — observability + finalized Docker
 
 **(this commit) — optional Langfuse tracing + a container that actually runs the whole pipeline**

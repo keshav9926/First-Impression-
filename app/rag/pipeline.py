@@ -13,6 +13,7 @@
 # apply the min_relevance threshold — each caller decides what to do with a
 # weak result (ask() refuses; the tool tells the agent "nothing found").
 
+from app import observability
 from app.rag import embeddings, fusion, keyword, rerank, store
 
 CANDIDATES_PER_RETRIEVER = 20  # each retriever's contribution to fusion
@@ -26,13 +27,22 @@ def retrieve(question: str, top_k: int) -> list[dict]:
     Each hit: {"id", "text", "url", "distance", "rrf_score", "relevance"}.
     May raise voyageai.error.* — callers map those to HTTP status codes.
     """
-    query_vector = embeddings.embed_query(question)
-    vector_hits = store.search(query_vector, top_k=CANDIDATES_PER_RETRIEVER)
-    keyword_hits = keyword.search(question, top_k=CANDIDATES_PER_RETRIEVER)
-    candidates = fusion.rrf(
-        vector_hits,
-        keyword_hits,
-        limit=CANDIDATES_TO_RERANK,
-        guaranteed_per_list=GUARANTEED_PER_LIST,
-    )
-    return rerank.rerank(question, candidates, top_k=top_k)
+    # Trace the hybrid funnel as a `retriever` observation (input = the query,
+    # output = the ranked hits) so grounding is visible in the trace. No-op
+    # unless tracing is on.
+    with observability.span("retrieve-context", as_type="retriever", input=question) as obs:
+        query_vector = embeddings.embed_query(question)
+        vector_hits = store.search(query_vector, top_k=CANDIDATES_PER_RETRIEVER)
+        keyword_hits = keyword.search(question, top_k=CANDIDATES_PER_RETRIEVER)
+        candidates = fusion.rrf(
+            vector_hits,
+            keyword_hits,
+            limit=CANDIDATES_TO_RERANK,
+            guaranteed_per_list=GUARANTEED_PER_LIST,
+        )
+        hits = rerank.rerank(question, candidates, top_k=top_k)
+        if obs:
+            obs.update(
+                output=[{"url": h.get("url"), "relevance": h.get("relevance")} for h in hits]
+            )
+        return hits

@@ -145,6 +145,7 @@ def verify_groundedness(report: FirstImpressionReport) -> FirstImpressionReport:
             ],
             prefer=settings.pool_prefer,
             response_format={"type": "json_object"},
+            label="groundedness-judge",
         )
         verdicts = _parse_verdicts(message.content or "")
     except Exception as exc:  # fail-open: judge is a bonus layer, not a gate
