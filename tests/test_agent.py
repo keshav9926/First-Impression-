@@ -101,16 +101,22 @@ def test_is_thin_extraction_calibrated_on_real_sites():
     assert _is_thin_extraction(2200, 229_954) is False  # vortexify (server-rendered)
 
 
-def test_is_thin_extraction_needs_both_signals():
+def test_is_thin_extraction_is_failsafe_on_text_only():
+    # NVIDIA-era rule (2026-07-18): thin is decided by the single robust signal —
+    # too little seed text — and the fragile ratio condition is gone. Escalating
+    # to render is cheap and safe, so we err toward True on low text.
     from app.ingestion.fetcher import _is_thin_extraction
 
-    # Low ratio but plenty of text (long content-rich page) → NOT thin.
+    # Plenty of text → NOT thin, whatever the ratio (bloated HTML is fine).
     assert _is_thin_extraction(5000, 2_000_000) is False
-    # Little text but high ratio (genuinely sparse, fully-rendered page) → NOT thin.
-    assert _is_thin_extraction(300, 6_000) is False
-    # Both tiny → thin.
+    # Little text → thin now, REGARDLESS of ratio (was False under the old
+    # both-signals rule; this is the fix for partly-rendered SPAs slipping by).
+    assert _is_thin_extraction(300, 6_000) is True
     assert _is_thin_extraction(300, 400_000) is True
-    # No HTML at all → not thin (avoids div-by-zero).
+    # Just under / over the 1200-char bar.
+    assert _is_thin_extraction(1199, 500_000) is True
+    assert _is_thin_extraction(1200, 500_000) is False
+    # No HTML at all → not thin (dead page, not a JS shell).
     assert _is_thin_extraction(0, 0) is False
 
 

@@ -128,17 +128,20 @@ def test_judge_disabled_by_flag(monkeypatch):
     assert called["n"] == 0 and len(out.what_the_product_is) == 2
 
 
-# ----- llm_pool.py: cross-provider failover -----
+# ----- llm_pool.py: NVIDIA-chain failover -----
+# The pool is NVIDIA-only (glm → dspro → nemo → mistral), so these exercise the
+# failover MACHINERY with NVIDIA provider names and the openai SDK's exception
+# types (all four models speak the OpenAI chat.completions dialect).
 
 
 def test_pool_fails_over_on_daily_quota(monkeypatch):
-    import groq as groq_sdk
     import httpx
+    import openai
 
     from app.agent import llm_pool
 
     fake_response = httpx.Response(
-        429, request=httpx.Request("POST", "http://groq.test"), headers={}
+        429, request=httpx.Request("POST", "http://nvidia.test"), headers={}
     )
 
     class FakeMsg:
@@ -149,13 +152,13 @@ def test_pool_fails_over_on_daily_quota(monkeypatch):
 
     calls = []
 
-    class FakeGroq:
+    class FakeGlm:
         class chat:
             class completions:
                 @staticmethod
                 def create(**k):
-                    calls.append("groq")
-                    raise groq_sdk.RateLimitError(
+                    calls.append("glm")
+                    raise openai.RateLimitError(
                         "tokens per day (TPD): Limit 100000",
                         response=fake_response,
                         body=None,
@@ -169,22 +172,21 @@ def test_pool_fails_over_on_daily_quota(monkeypatch):
                     calls.append("alt")
                     return FakeResp()
 
-    monkeypatch.setattr(llm_pool.settings, "groq_api_key", "k1")
-    monkeypatch.setattr(llm_pool.settings, "gemini_api_key", "k2")
+    monkeypatch.setattr(llm_pool.settings, "nvidia_api_key", "k1")
     monkeypatch.setattr(
-        llm_pool, "_client", lambda p: FakeGroq() if p == "groq" else FakeAlt()
+        llm_pool, "_client", lambda p: FakeGlm() if p == "glm" else FakeAlt()
     )
 
-    msg = llm_pool.chat([{"role": "user", "content": "hi"}], prefer="groq")
+    msg = llm_pool.chat([{"role": "user", "content": "hi"}], prefer="glm")
     assert msg.content == "ok"
-    assert calls == ["groq", "alt"]  # daily 429 → instant failover to next provider
+    assert calls == ["glm", "alt"]  # daily 429 → instant failover to next model
 
 
 def test_circuit_breaker_skips_dead_provider(monkeypatch):
-    # After a provider hits its daily cap, the NEXT call must skip it entirely
-    # instead of re-probing (the storm that wasted 8 Groq 429s per report).
-    import groq as groq_sdk
+    # After a model hits its daily cap, the NEXT call must skip it entirely
+    # instead of re-probing (the 429 storm that wasted calls per report).
     import httpx
+    import openai
 
     resp429 = httpx.Response(429, request=httpx.Request("POST", "http://g"))
 
@@ -196,44 +198,43 @@ def test_circuit_breaker_skips_dead_provider(monkeypatch):
 
     calls = []
 
-    class FakeGroq:
+    class FakeGlm:
         class chat:
             class completions:
                 @staticmethod
                 def create(**k):
-                    calls.append("groq")
-                    raise groq_sdk.RateLimitError(
+                    calls.append("glm")
+                    raise openai.RateLimitError(
                         "tokens per day (TPD): Limit 100000", response=resp429, body=None)
 
-    class FakeGemini:
+    class FakeAlt:
         class chat:
             class completions:
                 @staticmethod
                 def create(**k):
-                    calls.append("gemini")
+                    calls.append("alt")
                     return FakeResp()
 
-    monkeypatch.setattr(llm_pool.settings, "groq_api_key", "k")
-    monkeypatch.setattr(llm_pool.settings, "gemini_api_key", "k")
+    monkeypatch.setattr(llm_pool.settings, "nvidia_api_key", "k")
     monkeypatch.setattr(llm_pool, "_client",
-                        lambda p: FakeGroq() if p == "groq" else FakeGemini())
+                        lambda p: FakeGlm() if p == "glm" else FakeAlt())
     monkeypatch.setattr(llm_pool.time, "sleep", lambda s: None)
 
-    llm_pool.chat([{"role": "user", "content": "a"}], prefer="groq")  # trips groq
+    llm_pool.chat([{"role": "user", "content": "a"}], prefer="glm")  # trips glm
     calls.clear()
-    llm_pool.chat([{"role": "user", "content": "b"}], prefer="groq")  # groq now skipped
-    assert calls == ["gemini"]  # dead provider not re-probed
+    llm_pool.chat([{"role": "user", "content": "b"}], prefer="glm")  # glm now skipped
+    assert calls == ["alt"]  # dead model not re-probed
 
 
 def test_pool_retries_transient_5xx_then_succeeds(monkeypatch):
-    # A transient 500 on one provider must NOT crash the call — retry, succeed.
+    # A transient 500 on one model must NOT crash the call — retry, succeed.
     # (This is what crashed a persona node and killed the whole panel.)
-    import groq as groq_sdk
     import httpx
+    import openai
 
     from app.agent import llm_pool
 
-    resp500 = httpx.Response(500, request=httpx.Request("POST", "http://groq.test"))
+    resp500 = httpx.Response(500, request=httpx.Request("POST", "http://nvidia.test"))
 
     class FakeMsg:
         content = "recovered"
@@ -243,29 +244,29 @@ def test_pool_retries_transient_5xx_then_succeeds(monkeypatch):
 
     calls = {"n": 0}
 
-    class FakeGroq:
+    class FakeGlm:
         class chat:
             class completions:
                 @staticmethod
                 def create(**k):
                     calls["n"] += 1
                     if calls["n"] == 1:
-                        raise groq_sdk.InternalServerError(
+                        raise openai.InternalServerError(
                             "server error", response=resp500, body=None
                         )
                     return FakeResp()
 
-    monkeypatch.setattr(llm_pool.settings, "groq_api_key", "k1")
-    monkeypatch.setattr(llm_pool, "_client", lambda p: FakeGroq())
+    monkeypatch.setattr(llm_pool.settings, "nvidia_api_key", "k1")
+    monkeypatch.setattr(llm_pool, "_client", lambda p: FakeGlm())
     monkeypatch.setattr(llm_pool.time, "sleep", lambda s: None)  # no real backoff wait
 
-    msg = llm_pool.chat([{"role": "user", "content": "hi"}], prefer="groq")
+    msg = llm_pool.chat([{"role": "user", "content": "hi"}], prefer="glm")
     assert msg.content == "recovered" and calls["n"] == 2  # 1 failure + 1 retry
 
 
 def test_pool_retries_empty_completion(monkeypatch):
-    # A blank 200 completion (seen intermittently on Cerebras) must be retried,
-    # not returned — an empty body crashed a persona node and killed the panel.
+    # A blank 200 completion must be retried, not returned — an empty body
+    # crashed a persona node and killed the panel.
     from app.agent import llm_pool
 
     def msg(content, tool_calls=None):
@@ -289,11 +290,11 @@ def test_pool_retries_empty_completion(monkeypatch):
                     calls["n"] += 1
                     return r
 
-    monkeypatch.setattr(llm_pool.settings, "groq_api_key", "k1")
+    monkeypatch.setattr(llm_pool.settings, "nvidia_api_key", "k1")
     monkeypatch.setattr(llm_pool, "_client", lambda p: FakeClient())
     monkeypatch.setattr(llm_pool.time, "sleep", lambda s: None)
 
-    out = llm_pool.chat([{"role": "user", "content": "hi"}], prefer="groq")
+    out = llm_pool.chat([{"role": "user", "content": "hi"}], prefer="glm")
     assert out.content == '{"ok": true}' and calls["n"] == 3  # two blanks skipped
 
 
@@ -313,32 +314,25 @@ def test_pool_allows_empty_content_with_tool_calls(monkeypatch):
                 def create(**k):
                     return r
 
-    monkeypatch.setattr(llm_pool.settings, "groq_api_key", "k1")
+    monkeypatch.setattr(llm_pool.settings, "nvidia_api_key", "k1")
     monkeypatch.setattr(llm_pool, "_client", lambda p: FakeClient())
 
-    out = llm_pool.chat([{"role": "user", "content": "hi"}], prefer="groq")
+    out = llm_pool.chat([{"role": "user", "content": "hi"}], prefer="glm")
     assert out.tool_calls == [{"id": "1"}]  # not mistaken for an empty completion
 
 
-def test_pool_skips_providers_without_keys(monkeypatch):
+def test_pool_raises_when_no_key(monkeypatch):
+    # No NVIDIA key → no providers have a key → the order is empty and chat
+    # raises the "no provider configured" sentinel instead of silently hanging.
+    import pytest
+
     from app.agent import llm_pool
 
-    class FakeMsg:
-        content = "ok"
+    monkeypatch.setattr(llm_pool.settings, "nvidia_api_key", "")
 
-    class FakeResp:
-        choices = [type("C", (), {"message": FakeMsg()})()]
+    def _boom(p):  # _client must never be reached (order is empty)
+        raise AssertionError("no keyed provider should be attempted")
 
-    class FakeGemini:
-        class chat:
-            class completions:
-                @staticmethod
-                def create(**k):
-                    return FakeResp()
-
-    monkeypatch.setattr(llm_pool.settings, "groq_api_key", "")  # no groq key
-    monkeypatch.setattr(llm_pool.settings, "gemini_api_key", "k2")
-    monkeypatch.setattr(llm_pool, "_client", lambda p: FakeGemini())
-
-    msg = llm_pool.chat([{"role": "user", "content": "hi"}], prefer="groq")
-    assert msg.content == "ok"  # groq keyless → skipped → served by next provider
+    monkeypatch.setattr(llm_pool, "_client", _boom)
+    with pytest.raises(RuntimeError):
+        llm_pool.chat([{"role": "user", "content": "hi"}], prefer="glm")

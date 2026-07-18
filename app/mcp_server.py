@@ -46,10 +46,8 @@ def _report_keys_missing() -> str | None:
     gets the same clear 'set this key' message a curl user would."""
     if not settings.voyage_api_key:
         return "VOYAGE_API_KEY is not set on the server — embeddings are required."
-    if settings.agent_provider == "gemini" and not settings.gemini_api_key:
-        return "AGENT_PROVIDER=gemini but GEMINI_API_KEY is not set on the server."
-    if settings.agent_provider == "groq" and not settings.groq_api_key:
-        return "AGENT_PROVIDER=groq but GROQ_API_KEY is not set on the server."
+    if not settings.nvidia_api_key:
+        return "NVIDIA_API_KEY is not set on the server — the report pipeline runs on the NVIDIA pool."
     return None
 
 

@@ -1,31 +1,20 @@
-# app/agent/report.py — the report entry point + provider dispatch.
+# app/agent/report.py — the report entry point + guards.
 #
-# generate_report() picks a driver based on settings.agent_provider and returns
-# the same tuple regardless of which LLM produced it:
-#     (FirstImpressionReport, steps_log, pages_examined)
+# generate_report() returns (FirstImpressionReport, steps_log, pages_examined).
+# The report pipeline is NVIDIA-only (2026-07-18): both paths run on the pool
+# (agent/groq_driver.py over settings.pool_prefer, the GLM-led NVIDIA chain).
+#   panel=False → groq_driver.generate()  (single-agent explore → synthesize)
+#   panel=True  → agent/panel.py run_panel() (three personas over one explore)
 #
-#   "gemini" → _generate_gemini() below (Gemini function calling)
-#   "groq"   → groq_driver.generate() (Groq / Llama tool calling)
-#
-# Both drivers share the instructions (agent/prompts.py), the tools
-# (agent/tools.py), and the report schema (schemas.FirstImpressionReport).
-# Only the API dialect differs — that's the whole point of the split.
-#
-# EXPLORE (free-form ReAct) then SYNTHESIZE (schema-constrained) is the shape
-# in both drivers. We verified live that Gemini can reuse a tool-call history
-# for a schema-constrained call (scratchpad smoke tests) before building this.
+# EXPLORE (free-form ReAct) then SYNTHESIZE (schema-constrained JSON) is the
+# shape in both. apply_guards() then runs the shared safety pass (citation
+# verification → groundedness judge → thin-extraction caveat).
 #
 # CALL FLOW:
-#   main.py report() → generate_report() → the selected driver
-
-from google import genai
-from google.genai import types
+#   main.py report() → generate_report() → groq_driver.generate() / run_panel()
 
 from app import observability
-from app.agent import grounding, groq_driver, judge, prompts, tools
-from app.agent.llm import generate_with_retry
-from app.agent.react import run_react_loop
-from app.config import settings
+from app.agent import grounding, groq_driver, judge
 from app.rag import store
 from app.schemas import FirstImpressionReport
 
@@ -42,53 +31,6 @@ class InsufficientEvidenceError(ValueError):
     """Raised when the store holds too little to ground a report. Subclasses
     ValueError so older callers still catch it; main.py maps it to HTTP 409
     (a state problem — 'ingest first' — not a 502 synthesis failure)."""
-
-
-def _generate_gemini() -> tuple[FirstImpressionReport, list[dict], list[str]]:
-    """Run explore → synthesize on Gemini."""
-    client = genai.Client(api_key=settings.gemini_api_key)
-
-    # ---- Phase A: explore ----
-    explore_config = types.GenerateContentConfig(
-        system_instruction=prompts.EXPLORE_SYSTEM,
-        tools=[types.Tool(function_declarations=tools.FUNCTION_DECLARATIONS)],
-        # Manual calling: WE run the tools and log each step (see react.py).
-        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-    )
-    contents = [
-        types.Content(
-            role="user",
-            parts=[types.Part(text="Analyze this company's public site and prepare its report.")],
-        )
-    ]
-    contents, steps_log = run_react_loop(
-        client, settings.gemini_agent_model, contents, explore_config, settings.agent_max_steps
-    )
-
-    # ---- Phase B: synthesize into the schema ----
-    contents.append(
-        types.Content(role="user", parts=[types.Part(text=prompts.SYNTHESIZE_INSTRUCTION)])
-    )
-    synthesis = generate_with_retry(
-        client,
-        settings.gemini_agent_model,
-        contents,
-        types.GenerateContentConfig(
-            system_instruction=prompts.EXPLORE_SYSTEM,
-            response_mime_type="application/json",
-            response_schema=FirstImpressionReport,
-        ),
-    )
-    report: FirstImpressionReport | None = synthesis.parsed
-    if report is None:
-        # Schema-constrained output failed to parse (safety block / malformed
-        # JSON) — fail with a clear message, not an AttributeError downstream.
-        raise ValueError("Synthesis returned no parseable report — retry the request.")
-
-    pages_examined = sorted(
-        {s["args"]["url"] for s in steps_log if s["tool"] == "read_page" and "url" in s["args"]}
-    )
-    return report, steps_log, pages_examined
 
 
 def apply_guards(report: FirstImpressionReport) -> FirstImpressionReport:
@@ -150,10 +92,11 @@ def generate_report(panel: bool = False) -> tuple[FirstImpressionReport, list[di
             from app.agent.panel import run_panel  # local: langgraph import stays optional
 
             report, steps_log, pages_examined = run_panel()
-        elif settings.agent_provider == "groq":
-            report, steps_log, pages_examined = groq_driver.generate()
         else:
-            report, steps_log, pages_examined = _generate_gemini()
+            # Single-agent path: explore + synthesize on the NVIDIA pool
+            # (groq_driver is the OpenAI-compat driver; despite the legacy name
+            # it runs on settings.pool_prefer, the GLM-led NVIDIA chain).
+            report, steps_log, pages_examined = groq_driver.generate()
 
         if not panel:
             # Single-agent path: the synthesis LLM may have fabricated a panel

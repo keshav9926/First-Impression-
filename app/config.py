@@ -98,18 +98,22 @@ class Settings(BaseSettings):
     # try FIRST. "glm" = the finalized quality-first NVIDIA chain above.
     pool_prefer: str = "glm"
 
-    # --- Which LLM runs the /report agent: "gemini" or "groq" ---
-    # Separate from llm_provider (which drives /ask) because the agent is a
-    # high-volume workload with different rate-limit economics. The tool-calling
-    # dialects differ per provider, so each has its own driver (agent/*_driver
-    # style) behind this switch.
-    agent_provider: str = "gemini"
+    # --- LEGACY: which LLM runs the /report agent ---
+    # No longer routes anything (2026-07-18): the report pipeline is NVIDIA-only
+    # and always runs on the pool (agent/groq_driver.py over settings.pool_prefer).
+    # Kept only so old .env files with AGENT_PROVIDER set still boot. Remove once
+    # a non-NVIDIA report path is reintroduced.
+    agent_provider: str = "nvidia"
 
-    # Hard cap on the agent's explore loop, shared by BOTH drivers (react.py
-    # and groq_driver.py) so the two can never drift apart. 5 is enough for
-    # list_pages + read key pages + 1-2 targeted searches, and keeps the
-    # resent-history token burst inside Groq's ~12K tokens/minute free tier.
-    agent_max_steps: int = 5
+    # Hard cap on the agent's explore loop. Raised 5 → 7 (2026-07-18): the old
+    # cap of 5 existed only to keep the resent-history token burst inside Groq's
+    # ~12K tokens/minute free tier — and Groq is no longer in the pool (NVIDIA-
+    # only). With that constraint gone, the only cost of more steps is GLM
+    # latency. 7 covers list_pages + read 3-5 key pages + 2-3 targeted searches,
+    # so multi-page sites are actually explored rather than the agent running out
+    # of steps and reporting "not found" for pages it never reached. RE-BENCHMARK
+    # latency if you push this higher; revert to 5 if GLM per-step time hurts.
+    agent_max_steps: int = 7
 
     # Phase 5: one extra Gemini call per report that fact-checks every claim
     # against its cited page's stored text; unsupported claims are dropped.

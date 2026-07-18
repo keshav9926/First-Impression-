@@ -34,12 +34,21 @@ from app.schemas import FirstImpressionReport
 
 logger = logging.getLogger("first_impression")
 
-_PAGE_EXCERPT_CHARS = 3000  # per cited page, keeps the judge prompt bounded
+# Per cited page. Raised from 3000 → 8000 (2026-07-18): on the NVIDIA chain the
+# judge has ample context, and a true claim grounded DEEPER than the old 3000
+# cut was being judged "unsupported" and wrongly dropped. More page text = the
+# judge sees what it's checking against.
+_PAGE_EXCERPT_CHARS = 8000
 _JUDGED_FIELDS = (
     "what_the_product_is",
     "likely_new_user_journey",
     "friction_points",
     "standout_strengths",
+    # improvement_opportunities are opinion, but each cites a real page premise
+    # (`observed`) — fact-check that premise too, so advice can't rest on an
+    # unsupported observation. (Its item type has .suggestion/.observed instead
+    # of .claim/.evidence — _claim_evidence normalizes both.)
+    "improvement_opportunities",
 )
 
 _JUDGE_INSTRUCTION = """\
@@ -87,6 +96,15 @@ def _parse_verdicts(content: str) -> list[ClaimVerdict]:
         return salvaged
 
 
+def _claim_evidence(obs: object) -> tuple[str, str]:
+    """Normalize the (claim, evidence) pair across the two judged item types:
+    an Observation carries .claim/.evidence; an ImprovementOpportunity carries
+    .suggestion/.observed (its `observed` IS the grounded premise to check)."""
+    claim = getattr(obs, "claim", None) or getattr(obs, "suggestion", "")
+    evidence = getattr(obs, "evidence", None) or getattr(obs, "observed", "")
+    return claim, evidence
+
+
 def _page_texts(urls: set[str]) -> dict[str, str]:
     """url → that page's stored text, capped. The judge reads the SAME evidence
     the agent had — not a re-crawl (deterministic, no network, no drift)."""
@@ -126,8 +144,9 @@ def verify_groundedness(report: FirstImpressionReport) -> FirstImpressionReport:
 
     pages = _page_texts({obs.source_url for _, obs in indexed})
     claims_block = "\n".join(
-        f"[{i}] claim: {obs.claim!r} | evidence quoted: {obs.evidence!r} | cited page: {obs.source_url}"
+        f"[{i}] claim: {c!r} | evidence quoted: {e!r} | cited page: {obs.source_url}"
         for i, (_, obs) in enumerate(indexed)
+        for c, e in (_claim_evidence(obs),)
     )
     pages_block = "\n\n".join(f"=== SOURCE PAGE {u} ===\n{t}" for u, t in pages.items())
     prompt = f"{_JUDGE_INSTRUCTION}\n\nCLAIMS:\n{claims_block}\n\n{pages_block}"
@@ -145,11 +164,24 @@ def verify_groundedness(report: FirstImpressionReport) -> FirstImpressionReport:
             ],
             prefer=settings.pool_prefer,
             response_format={"type": "json_object"},
+            # Enough tokens for one small verdict per claim so the JSON array is
+            # not cut mid-stream (truncated tails default to "kept" — see
+            # _parse_verdicts — so avoiding the cut avoids keeping unverified
+            # claims). The NVIDIA chain has the headroom.
+            max_tokens=4000,
             label="groundedness-judge",
         )
         verdicts = _parse_verdicts(message.content or "")
     except Exception as exc:  # fail-open: judge is a bonus layer, not a gate
+        # But SURFACE it — a silent skip lets an unverified report look verified.
+        # The reader must know the automated fact-check did not run this time.
         logger.warning("groundedness judge skipped (fail-open): %s", exc)
+        report.scope_note = (
+            report.scope_note.rstrip(".")
+            + ". NOTE: the automated groundedness fact-check could not run for this "
+            "report (the judge model was unavailable), so claims are cited but not "
+            "double-verified against their source pages — treat them accordingly."
+        )
         return report
 
     unsupported = {
@@ -159,7 +191,7 @@ def verify_groundedness(report: FirstImpressionReport) -> FirstImpressionReport:
         logger.warning(
             "groundedness judge dropped %d claim(s): %s",
             len(unsupported),
-            [indexed[i][1].claim for i in sorted(unsupported)],
+            [_claim_evidence(indexed[i][1])[0] for i in sorted(unsupported)],
         )
         for field in _JUDGED_FIELDS:
             kept = [

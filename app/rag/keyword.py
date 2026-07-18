@@ -31,13 +31,32 @@ from rank_bm25 import BM25Okapi
 from app.rag import store
 
 
+# Suffixes stripped by the light stemmer below, longest first so "-ing"/"-es"
+# win over the bare "-s". No dependency (a real stemmer like Porter would need
+# nltk); this crude rule collapses the common inflections BM25's exact-match
+# would otherwise miss ("shifts" vs "shift", "integrations" vs "integration").
+_STEM_SUFFIXES = ("ing", "es", "ed", "s")
+
+
+def _stem(token: str) -> str:
+    """Strip one common English suffix if the remaining stem stays substantial
+    (>2 chars). Deliberately crude and slightly over-eager: it is applied to the
+    corpus AND the query identically, so over-stemming rarely hurts recall, and
+    BM25 only NOMINATES candidates — the cross-encoder reranker (which reads the
+    full text) is the real judge, so a little conflation here is safe."""
+    for suffix in _STEM_SUFFIXES:
+        if token.endswith(suffix) and len(token) - len(suffix) > 2:
+            return token[: -len(suffix)]
+    return token
+
+
 def _tokenize(text: str) -> list[str]:
-    """Lowercase and split into word tokens — applied identically to the
-    corpus and the query so they meet in the same token space.
+    """Lowercase, split into word tokens, and light-stem — applied identically
+    to the corpus and the query so they meet in the same token space.
 
     Called by: search(), for every chunk and for the question.
     """
-    return re.findall(r"[a-z0-9]+", text.lower())
+    return [_stem(t) for t in re.findall(r"[a-z0-9]+", text.lower())]
 
 
 def search(question: str, top_k: int) -> list[dict]:

@@ -34,11 +34,10 @@ import queue
 import threading
 from pathlib import Path
 
-import groq
+import openai
 import voyageai.error
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
-from google.genai import errors as genai_errors
 
 from app import events
 from app.agent.report import InsufficientEvidenceError, generate_report
@@ -263,18 +262,11 @@ def report(panel: bool = False) -> ReportResponse:
     Voyage calls from the search_content tool); the request blocks meanwhile.
     Async/background jobs are a known future improvement, not this phase.
     """
-    # The report agent needs Voyage (its search_content tool) plus the key for
-    # whichever agent provider is configured.
+    # The report agent needs Voyage (its search_content tool) plus the NVIDIA key
+    # — the report pipeline runs entirely on the NVIDIA pool (GLM-led chain).
     _require_keys(voyage=True)
-    if settings.agent_provider == "gemini" and not settings.gemini_api_key:
-        raise HTTPException(status_code=503, detail="GEMINI_API_KEY is not set in .env")
-    if settings.agent_provider == "groq" and not settings.groq_api_key:
-        raise HTTPException(status_code=503, detail="GROQ_API_KEY is not set in .env")
-    if settings.agent_provider not in ("gemini", "groq"):
-        raise HTTPException(
-            status_code=501,
-            detail="AGENT_PROVIDER must be 'gemini' or 'groq'.",
-        )
+    if not settings.nvidia_api_key:
+        raise HTTPException(status_code=503, detail="NVIDIA_API_KEY is not set in .env")
 
     if store.count() == 0:
         raise HTTPException(status_code=409, detail="Nothing ingested yet — call /ingest first.")
@@ -288,14 +280,15 @@ def report(panel: bool = False) -> ReportResponse:
             detail="Voyage free-tier rate limit hit during analysis — wait a "
             "minute and retry.",
         )
-    except groq.RateLimitError:
-        # Groq agent provider exhausted its rate limit despite in-driver retry.
+    except openai.RateLimitError:
+        # The whole NVIDIA chain exhausted its rate limit despite in-pool retry
+        # and failover (the four models share one account quota).
         raise HTTPException(
             status_code=429,
-            detail="Groq rate limit hit during analysis — wait a minute and retry.",
+            detail="NVIDIA rate limit hit during analysis — wait a minute and retry.",
         )
-    except groq.BadRequestError as exc:
-        # Persistent 'tool_use_failed' after in-driver retries: the model kept
+    except openai.BadRequestError as exc:
+        # Persistent 'tool_use_failed' after in-pool retries: the model kept
         # emitting malformed tool-call syntax. Upstream failure, not our bug.
         if "tool_use_failed" not in str(exc):
             raise
@@ -303,17 +296,6 @@ def report(panel: bool = False) -> ReportResponse:
             status_code=502,
             detail="The exploration model repeatedly produced malformed tool "
             "calls — please retry.",
-        )
-    except genai_errors.ClientError as exc:
-        # Gemini quota exhausted despite generate_with_retry (a truly spent
-        # DAILY quota looks like endless 429s). Other client errors are real
-        # bugs — let those surface as 500s.
-        if getattr(exc, "code", None) != 429:
-            raise
-        raise HTTPException(
-            status_code=429,
-            detail="Gemini rate limit hit during analysis — the free daily "
-            "quota may be exhausted; retry later.",
         )
     except InsufficientEvidenceError as exc:
         # Store too thin to ground a report — a state problem, not a synthesis

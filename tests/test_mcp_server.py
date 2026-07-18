@@ -14,11 +14,10 @@ from app.schemas import FirstImpressionReport, Observation
 
 @pytest.fixture(autouse=True)
 def _keys_present(monkeypatch):
-    """Default every test to a fully-configured server (Voyage + the gemini
-    agent key). Guard tests blank a key explicitly."""
+    """Default every test to a fully-configured server (Voyage + the NVIDIA
+    pool key). Guard tests blank a key explicitly."""
     monkeypatch.setattr(mcp_server.settings, "voyage_api_key", "vk")
-    monkeypatch.setattr(mcp_server.settings, "gemini_api_key", "gk")
-    monkeypatch.setattr(mcp_server.settings, "agent_provider", "gemini")
+    monkeypatch.setattr(mcp_server.settings, "nvidia_api_key", "nk")
 
 
 def _fake_report() -> FirstImpressionReport:

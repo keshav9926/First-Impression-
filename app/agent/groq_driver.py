@@ -20,12 +20,9 @@ import json
 import re
 
 import pydantic
-from google import genai
-from google.genai import types as genai_types
 
 from app import events, observability
 from app.agent import llm_pool, prompts, tools
-from app.agent.llm import generate_with_retry
 from app.config import settings
 from app.schemas import FirstImpressionReport
 
@@ -186,11 +183,11 @@ def synthesize(context: str, extra_context: str = "") -> FirstImpressionReport:
     Called by: generate() below and agent/panel.py (which passes the persona
     panel's findings as extra_context so the final report can reflect them).
 
-    Primary: the finalized NVIDIA quality chain (GLM-5.2 → DeepSeek-V4-Pro →
-    Nemotron-3-Ultra → Mistral-Medium-3.5) via the pool. Fallback: native Gemini
-    with response_schema (a different key = rate-limit insurance, and Gemini's
-    schema-constrained decoding is a reliable last resort if the NVIDIA chain
-    returns nothing parseable).
+    Runs on the finalized NVIDIA quality chain (GLM-5.2 → DeepSeek-V4-Pro →
+    Nemotron-3-Ultra → Mistral-Medium-3.5) via the pool, over OpenAI-compat JSON
+    mode. If the WHOLE chain returns nothing parseable, we HARD-FAIL (ValueError)
+    rather than silently degrading — a visible failure the caller maps to a 502,
+    which is recoverable by retry, beats shipping a half-baked report.
     """
     synthesis_prompt = (
         "Below is the raw exploration log from a ReAct agent that examined the "
@@ -201,58 +198,12 @@ def synthesize(context: str, extra_context: str = "") -> FirstImpressionReport:
         + prompts.SYNTHESIZE_INSTRUCTION
     )
 
-    # Primary path: the finalized NVIDIA chain.
     report = _synthesize_via_pool(synthesis_prompt)
     if report is not None:
         return report
-
-    # Fallback path: native Gemini (schema-constrained).
-    synthesis_config = genai_types.GenerateContentConfig(
-        system_instruction=prompts.EXPLORE_SYSTEM,
-        response_mime_type="application/json",
-        response_schema=FirstImpressionReport,
+    raise ValueError(
+        "Synthesis produced no parseable report from the NVIDIA chain — retry the request."
     )
-    # Synthesis chain of (api_key, model): Gemini 3 Flash on account 1, then
-    # account 2 (each ~20 RPD → ~40 premium syntheses/day combined). By choice
-    # there is NO lower-tier fallback: once both accounts' 3-flash quota is
-    # spent the report HARD-FAILS, so exhaustion is visible (add a 3rd key)
-    # rather than silently degrading synthesis quality. Transient 503s are still
-    # retried per candidate inside generate_with_retry.
-    k1, k2 = settings.gemini_api_key, settings.gemini_secondacc_api_key
-    candidates = [
-        (k1, settings.gemini_agent_model),   # 3-flash · account 1
-        (k2, settings.gemini_agent_model),   # 3-flash · account 2
-    ]
-    last_exc: Exception = RuntimeError("no Gemini key configured for synthesis")
-    for api_key, model in candidates:
-        if not api_key:
-            continue
-        try:
-            synthesis_response = generate_with_retry(
-                genai.Client(api_key=api_key), model, synthesis_prompt, synthesis_config
-            )
-            # Count this native (non-pool) Gemini call so get_usage() reflects
-            # total quota consumption — 1 request/report when healthy.
-            llm_pool.record(f"gemini-native:{model}")
-            # Phase 8: trace the native synthesis too (the pool path is traced in
-            # llm_pool.chat; this is the fallback branch). No-op unless enabled.
-            observability.record_generation(
-                name="synthesis:gemini-native",
-                model=model,
-                input=synthesis_prompt,
-                output=getattr(synthesis_response, "text", None),
-            )
-        except Exception as exc:  # exhausted retries on this candidate → next
-            llm_pool.record(f"gemini-native:{model}", "error")
-            last_exc = exc
-            continue
-        report: FirstImpressionReport | None = synthesis_response.parsed
-        if report is not None:
-            return report
-        # Schema-constrained output failed to parse (safety block / malformed
-        # JSON) — try the next candidate rather than dying here.
-        last_exc = ValueError("Synthesis returned no parseable report — retry the request.")
-    raise last_exc
 
 
 def pages_from_steps(steps_log: list[dict]) -> list[str]:

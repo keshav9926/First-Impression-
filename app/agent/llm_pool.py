@@ -1,19 +1,25 @@
-# app/agent/llm_pool.py — one chat() over a multi-provider failover chain.
+# app/agent/llm_pool.py — one chat() over the NVIDIA failover chain.
 #
-# WHY: no single free tier can carry the agent's bursty, many-call workload, and
-# any one model/provider can be down, throttled, or (for a given account) gated.
-# Every provider speaks the OpenAI chat.completions dialect, so one call-site can
-# prefer one and fail over down the chain:
+# WHY: the agent's bursty, many-call workload needs headroom and resilience —
+# any one model can be down, throttled, or return junk. All four NVIDIA models
+# speak the OpenAI chat.completions dialect, so one call-site can prefer one and
+# fail over down the chain:
 #   - per-MINUTE 429  → sleep the server's Retry-After, same provider
 #   - per-DAY 429     → sleeping won't help TODAY → switch provider immediately
 #     (and trip the circuit breaker so we stop re-probing it this run)
 #   - 5xx / blank completion → transient → retry then fail over
 #   - tool_use_failed 400 → stochastic malformed tool-call syntax → re-ask
 #
-# THE CHAIN (see _PROVIDERS): the finalized NVIDIA quality models first
-# (glm → dspro → nemo → mistral, one nvapi key), then Gemini/Groq as the deep
-# fallback on a DIFFERENT key (real rate-limit insurance — the NVIDIA models
-# share one account quota). Callers pass prefer=settings.pool_prefer ("glm").
+# THE CHAIN (see _PROVIDERS): the finalized NVIDIA quality models, one nvapi key
+# over integrate.api.nvidia.com:  glm → dspro → nemo → mistral.
+# Callers pass prefer=settings.pool_prefer ("glm").
+#
+# NVIDIA-ONLY (2026-07-18): Gemini/Groq were removed from this pool — testing is
+# standardized on NVIDIA. Their API keys stay in .env (config still reads them)
+# so the providers can be re-added later; this module simply no longer routes to
+# them. Because all four models share ONE account quota, a daily cap can trip
+# them together — if that becomes a problem, re-introduce a different-key
+# provider here as deep fallback.
 #
 # CALL FLOW:
 #   groq_driver.explore()/synthesize() / panel._judge_as() / judge.verify_groundedness()
@@ -23,7 +29,6 @@ import logging
 import re
 import time
 
-import groq
 import openai
 
 from app import observability
@@ -34,13 +39,12 @@ logger = logging.getLogger("first_impression")
 _MAX_RATE_RETRIES = 6
 _MAX_FORMAT_RETRIES = 3
 _MAX_SERVER_RETRIES = 3  # transient 5xx (provider hiccup) — retry, then fail over
-_MAX_EMPTY_RETRIES = 3  # blank 200 completion (seen on Cerebras) — retry, then fail over
+_MAX_EMPTY_RETRIES = 3  # blank 200 completion — retry, then fail over
 
 # Circuit breaker cooldowns. Once a provider gives up on a call (daily cap, or
 # persistent rate/5xx/empty), we stop asking it for a while — otherwise the
-# explore loop re-probes a dead provider on EVERY step (measured: 8 wasted 429s
-# to Groq + 8 to Cerebras in one report). A daily cap won't clear soon → long
-# cooldown; a transient throttle → short.
+# explore loop re-probes a dead provider on EVERY step. A daily cap won't clear
+# soon → long cooldown; a transient throttle → short.
 _DAILY_COOLDOWN = 900.0  # 15 min — daily quota won't reset before then
 _TRANSIENT_COOLDOWN = 60.0  # 1 min — throttle/5xx/empty; re-probe soon
 
@@ -50,79 +54,36 @@ _DAILY_MARKERS = ("per day", "tokens per day", "tpd", "rpd", "daily")
 
 
 # Failover chain, in preference order after the caller's `prefer`. The finalized
-# NVIDIA quality chain leads (all one nvapi- key, integrate.api.nvidia.com);
-# Gemini/Groq are the DEEP fallback (a DIFFERENT key = real rate-limit insurance,
-# since the four NVIDIA models share one account quota).
-#   glm → dspro → nemo → mistral  (NVIDIA)  then  gemini → gemini2 → groq
-_PROVIDERS = ("glm", "dspro", "nemo", "mistral", "gemini", "gemini2", "groq")
+# NVIDIA quality chain (all one nvapi- key, integrate.api.nvidia.com).
+#   glm → dspro → nemo → mistral
+_PROVIDERS = ("glm", "dspro", "nemo", "mistral")
 _NVIDIA_PROVIDERS = ("glm", "dspro", "nemo", "mistral")
-_GEMINI_PROVIDERS = ("gemini", "gemini2")  # need history-flattening + model override
 # DeepSeek-V4-Pro fails tool-calling (verified) — skip it when tools are wanted
 # (the explore loop), or it errors instead of serving. Fine for persona/synthesis.
 _NO_TOOLS = ("dspro",)
 _NVIDIA_BASE = "https://integrate.api.nvidia.com/v1"
 
-# Google exposes Gemini behind an OpenAI-compatible surface, so it drops into
-# this pool with the same client + kwargs (tools=, response_format=) as the rest.
-_GEMINI_OPENAI_BASE = "https://generativelanguage.googleapis.com/v1beta/openai/"
-
 
 def _provider_key(provider: str) -> str:
     """The API key a provider authenticates with (one source of truth, used by
-    both _client and the key-presence filter in chat)."""
-    if provider == "groq":
-        return settings.groq_api_key
-    if provider == "gemini":
-        return settings.gemini_api_key  # account 1
-    if provider == "gemini2":
-        return settings.gemini_secondacc_api_key  # account 2
+    both _client and the key-presence filter in chat). One nvapi- key serves all
+    four NVIDIA models."""
     if provider in _NVIDIA_PROVIDERS:
-        return settings.nvidia_api_key  # one key for all four NVIDIA models
+        return settings.nvidia_api_key
     return ""
 
 
 def _client(provider: str):
-    """OpenAI-compatible client for a provider. All speak the same
+    """OpenAI-compatible client for a provider. All NVIDIA models speak the same
     .chat.completions.create surface, which is what makes this pool possible.
 
-    For the OpenAI-compat providers we instantiate whatever class observability
-    hands us — the Langfuse OpenAI drop-in when tracing is on (so every call is
-    auto-captured as a generation), else plain openai.OpenAI. Groq uses its own
-    SDK, so it is traced manually in chat() instead."""
-    if provider == "groq":
-        return groq.Groq(api_key=settings.groq_api_key)
+    We instantiate whatever class observability hands us — the Langfuse OpenAI
+    drop-in when tracing is on (so every call is auto-captured as a generation),
+    else plain openai.OpenAI."""
     openai_cls = observability.openai_client_class()
-    if provider in _GEMINI_PROVIDERS:
-        return openai_cls(base_url=_GEMINI_OPENAI_BASE, api_key=_provider_key(provider))
     if provider in _NVIDIA_PROVIDERS:
         return openai_cls(base_url=_NVIDIA_BASE, api_key=settings.nvidia_api_key)
     raise ValueError(f"unknown provider: {provider}")
-
-
-def _gemini_safe(messages: list) -> list:
-    """Flatten past tool-call turns into plain text for Gemini.
-
-    Gemini-3-generation models (3-flash, 3.1-flash-lite — verified live) demand
-    a `thought_signature` on every functionCall part in the HISTORY and 400
-    without it. Our pool rebuilds history as plain OpenAI dicts (and mixes
-    providers mid-conversation), so that signature cannot exist. Rewriting past
-    assistant-tool_calls turns as text and tool results as user text removes
-    every functionCall part from history — nothing left to demand a signature —
-    while the model can still emit NEW tool calls normally."""
-    out = []
-    for m in messages:
-        if m.get("role") == "assistant" and m.get("tool_calls"):
-            calls = ", ".join(
-                f"{tc['function']['name']}({tc['function']['arguments']})"
-                for tc in m["tool_calls"]
-            )
-            text = ((m.get("content") or "") + f"\n[I called tools: {calls}]").strip()
-            out.append({"role": "assistant", "content": text})
-        elif m.get("role") == "tool":
-            out.append({"role": "user", "content": f"[tool result]: {m.get('content') or ''}"})
-        else:
-            out.append(m)
-    return out
 
 
 _NVIDIA_MODEL_ATTR = {
@@ -134,10 +95,6 @@ _NVIDIA_MODEL_ATTR = {
 
 
 def _model(provider: str) -> str:
-    if provider == "groq":
-        return settings.groq_model
-    if provider in _GEMINI_PROVIDERS:
-        return settings.gemini_pool_model
     if provider in _NVIDIA_PROVIDERS:
         return getattr(settings, _NVIDIA_MODEL_ATTR[provider])
     raise ValueError(f"unknown provider: {provider}")
@@ -169,9 +126,8 @@ _usage: dict = {}
 
 
 def record(label: str, outcome: str = "ok") -> None:
-    """Tally one call against `label` (e.g. 'gemini:gemini-2.5-flash'). Public so
-    callers OUTSIDE the pool — the native Gemini synthesis — count too, giving a
-    complete usage picture."""
+    """Tally one call against `label` (e.g. 'glm:z-ai/glm-5.2'). Public so callers
+    OUTSIDE the pool can count too, giving a complete usage picture."""
     row = _usage.setdefault(
         label,
         {"ok": 0, "rate_429": 0, "server_5xx": 0, "empty": 0, "bad_request": 0, "conn": 0},
@@ -217,25 +173,21 @@ def _live(order: list) -> list:
 
 def chat(
     messages: list,
-    prefer: str = "groq",
-    gemini_model: str | None = None,
+    prefer: str = "glm",
     label: str = "llm-call",
     **kwargs,
 ):
     """chat.completions.create with retry + cross-provider failover.
 
-    Returns the response's .choices[0].message (same shape on both SDKs).
-    kwargs pass through: tools=, tool_choice=, response_format=.
-    gemini_model overrides settings.gemini_pool_model for the Gemini provider
-    only (per-call model experiments; other providers keep their own model).
+    Returns the response's .choices[0].message.
+    kwargs pass through: tools=, tool_choice=, response_format=, max_tokens=.
     `label` names the Langfuse generation (e.g. "explore-step", "persona-judge",
     "synthesize") — best practice: an active, stable name, model kept as its own
     attribute. No-op when tracing is off.
     Raises the LAST provider's error only when ALL providers are exhausted.
     """
-    # Caller's preferred provider first, then the rest of the chain (Gemini last
-    # as the safety net). De-duped, and any provider without a key is skipped
-    # rather than auth-erroring.
+    # Caller's preferred provider first, then the rest of the chain. De-duped,
+    # and any provider without a key is skipped rather than auth-erroring.
     order = [prefer] + [p for p in _PROVIDERS if p != prefer]
     seen: set = set()
     order = [
@@ -252,22 +204,16 @@ def chat(
 
     for provider in order:
         client = _client(provider)
-        # Per-provider model + Gemini history flattening (thought_signature fix).
-        if provider in _GEMINI_PROVIDERS:
-            model_name = gemini_model or _model(provider)
-            body = _gemini_safe(messages)
-        else:
-            model_name = _model(provider)
-            body = messages
+        model_name = _model(provider)
+        body = messages
         rate_tries = 0
         format_tries = 0
         server_tries = 0
         empty_tries = 0
-        # For the OpenAI drop-in (all providers except Groq) pass name/metadata
-        # so the auto-captured generation is well-named. Groq uses its own SDK
-        # which would reject these kwargs, so it's traced manually below instead.
+        # Pass name/metadata so the auto-captured generation is well-named
+        # (no-op unless tracing is on).
         create_kwargs = dict(kwargs)
-        if provider != "groq" and observability.enabled():
+        if observability.enabled():
             create_kwargs["name"] = label
             create_kwargs["metadata"] = {"provider": provider, "role": label}
         while True:
@@ -276,12 +222,12 @@ def chat(
                     model=model_name, messages=body, **create_kwargs
                 )
                 message = response.choices[0].message
-                # Empty completion guard: some models (seen on Cerebras
-                # zai-glm-4.7) intermittently return blank content on a 200.
-                # For our text/JSON callers (personas, judge, synthesis) that
-                # is useless and, unretried, crashed a persona node → the whole
-                # panel. A turn with tool_calls legitimately has empty content
-                # (explore), so only treat blank-AND-no-tool-calls as transient.
+                # Empty completion guard: some models intermittently return blank
+                # content on a 200. For our text/JSON callers (personas, judge,
+                # synthesis) that is useless and, unretried, crashes a node → the
+                # whole panel. A turn with tool_calls legitimately has empty
+                # content (explore), so only treat blank-AND-no-tool-calls as
+                # transient.
                 if not (message.content or "").strip() and not getattr(message, "tool_calls", None):
                     _tally(provider, model_name, "empty")
                     empty_tries += 1
@@ -293,24 +239,11 @@ def chat(
                     time.sleep(min(2**empty_tries, 10))
                     continue
                 _tally(provider, model_name, "ok")
-                # OpenAI-compat providers are auto-traced by the langfuse.openai
-                # drop-in (see _client). Groq uses its own SDK the drop-in can't
-                # patch, so log it manually here (no-op unless tracing is on).
-                if provider == "groq":
-                    observability.record_generation(
-                        name=label,
-                        model=model_name,
-                        input=body,
-                        output=message.content,
-                        usage=getattr(response, "usage", None),
-                        metadata={"provider": provider},
-                    )
                 return message
-            except (groq.InternalServerError, openai.InternalServerError) as exc:
+            except openai.InternalServerError as exc:
                 # 5xx = the provider glitched (not our request). These are
-                # transient — a single one must not kill a whole report, which
-                # is how a persona node crashed the panel. Retry with backoff,
-                # then fail over to the other provider.
+                # transient — a single one must not kill a whole report. Retry
+                # with backoff, then fail over to the next provider.
                 _tally(provider, model_name, "server_5xx")
                 last_exc = exc
                 server_tries += 1
@@ -319,7 +252,7 @@ def chat(
                     _trip(provider, _TRANSIENT_COOLDOWN)
                     break
                 time.sleep(min(2**server_tries, 15))
-            except (groq.RateLimitError, openai.RateLimitError) as exc:
+            except openai.RateLimitError as exc:
                 _tally(provider, model_name, "rate_429")
                 last_exc = exc
                 if _is_daily(exc):
@@ -328,29 +261,28 @@ def chat(
                     break  # next provider
                 rate_tries += 1
                 hint = _retry_after_seconds(exc)
-                # A hintless 429 is a transient overload ("high traffic, try
-                # again soon" — seen on Cerebras). If another provider is still
-                # available, don't grind through 6 backoffs (~60s) — a couple of
-                # quick tries, then fail over to it. Only when this is the LAST
-                # provider do we wait out the full retry budget.
+                # A hintless 429 is a transient overload. If another provider is
+                # still available, don't grind through 6 backoffs (~60s) — a
+                # couple of quick tries, then fail over. Only when this is the
+                # LAST provider do we wait out the full retry budget.
                 is_last = provider == order[-1]
                 limit = _MAX_RATE_RETRIES if (hint or is_last) else 2
                 if rate_tries >= limit:
                     _trip(provider, _TRANSIENT_COOLDOWN)  # throttled → deprioritize briefly
                     break  # give up on this provider → next one (or raise)
                 time.sleep(min(hint or 2**rate_tries, 60))
-            except (groq.BadRequestError, openai.BadRequestError) as exc:
-                _tally(provider, model_name, "bad_request")  # count ALL 400s (incl re-raised) for visibility
+            except openai.BadRequestError as exc:
+                _tally(provider, model_name, "bad_request")  # count ALL 400s for visibility
                 last_exc = exc
                 if "tool_use_failed" not in str(exc):
-                    raise  # real bad request (e.g. Gemini-3 thought_signature) — surface it
+                    raise  # real bad request — surface it
                 format_tries += 1  # stochastic malformed tool-call → re-ask
                 if format_tries >= _MAX_FORMAT_RETRIES:
                     _trip(provider, _TRANSIENT_COOLDOWN)
                     break
-            except (groq.APIConnectionError, openai.APIConnectionError) as exc:
+            except openai.APIConnectionError as exc:
                 _tally(provider, model_name, "conn")
                 last_exc = exc
                 _trip(provider, _TRANSIENT_COOLDOWN)
-                break  # network/DNS blip on this provider → try the other
+                break  # network/DNS blip on this provider → try the next
     raise last_exc

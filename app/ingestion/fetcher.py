@@ -66,31 +66,33 @@ class Page:
 
 # Detecting a JS-rendered site (SPA / Framer / Webflow) where the static HTML
 # is a shell and the real content hydrates in the browser (a static fetch never
-# sees it). Calibrated on two real HOMEPAGES (2026-07-15):
-#   vortexify.ai (server-rendered): 2200 text / 230K html = 0.96%  → NOT thin
-#   trynarrative.com (Framer/JS):     368 text / 388K html = 0.09%  → thin
-# Ratio alone is fragile (modern HTML is bloated even when server-rendered — the
-# two sites sit only ~10x apart). A real JS shell shows BOTH signatures: almost
-# no extractable text AND a tiny text/HTML ratio. Requiring BOTH avoids flagging
-# a genuinely sparse-but-fully-rendered landing page. Only 2 data points so far
-# — revisit thresholds as more sites are tested.
-_THIN_SEED_MAX_TEXT_CHARS = 800  # below this the page is nearly empty
-_THIN_SEED_MAX_RATIO = 0.005  # AND below this it's mostly HTML shell
+# sees it). FAIL-SAFE by design (2026-07-18): the earlier text-AND-ratio rule
+# was tuned on only 2 sites and its dangerous failure mode was a FALSE NEGATIVE
+# — a partly-rendered SPA slipping through, so the report confidently claims
+# "the site doesn't mention X" about content we simply never read. The ratio
+# signal was the fragile half (modern HTML is bloated even when server-rendered),
+# so it's dropped. We now escalate on the single robust signal — the seed page
+# came back with very little text — because escalation is CHEAP and SAFE: it
+# just tries a headless render and keeps the static result if that doesn't help.
+# Over-escalating a small-but-fine page costs one browser spin-up; under-
+# escalating a real SPA silently corrupts the report. We bias toward the former.
+# The same function also flags the POST-render result: a genuinely content-rich
+# rendered page has far more than this, so it won't be caveated.
+_THIN_SEED_MAX_TEXT_CHARS = 1200  # seed text below this → treat as thin, try rendering
 
 
 def _is_thin_extraction(seed_text_chars: int, seed_html_chars: int) -> bool:
-    """True when the SEED page looks like an unrendered JS shell — very little
-    text AND a tiny text/HTML ratio (both required, so a small fully-rendered
-    page is not mistaken for a broken one).
+    """True when the SEED page came back with too little text to trust — the
+    robust JS-shell signal. Fail-safe: err toward True (escalate to render),
+    since render falls back to the static result if it doesn't help.
 
-    Called by: crawl(). The seed (usually the homepage) is the right page to
-    judge on: it carries the first impression, and it's exactly the page that
-    hydrates client-side on JS sites. Big static legal pages (privacy/terms)
-    would otherwise dilute an aggregate ratio and hide the problem."""
+    Called by: crawl() (to decide whether to escalate to headless) and
+    _crawl_loop (to flag the final result). The seed (usually the homepage) is
+    the right page to judge on: it carries the first impression, and it's exactly
+    the page that hydrates client-side on JS sites."""
     if seed_html_chars == 0:
-        return False
-    ratio = seed_text_chars / seed_html_chars
-    return seed_text_chars < _THIN_SEED_MAX_TEXT_CHARS and ratio < _THIN_SEED_MAX_RATIO
+        return False  # nothing fetched at all — not a "thin" signal, a dead page
+    return seed_text_chars < _THIN_SEED_MAX_TEXT_CHARS
 
 
 @dataclass

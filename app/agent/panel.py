@@ -102,33 +102,35 @@ def _make_persona_node(persona: dict):
     return node
 
 
-def _ensure_one_positive(impressions: list[PersonaImpression]) -> list[PersonaImpression]:
-    """Product rule: a founder-facing report must never land unanimously "nobody
-    would sign up" — that reads as an attack, not a first impression, and buries
-    whatever genuinely worked. If NO persona said yes, promote the one with the
-    strongest positive signal (most resonated, least friction) to a yes, and
-    reframe its reason around what actually worked FOR THAT PERSONA (grounded in
-    its own what_resonated — no invented content, no extra LLM call).
+def _order_by_strength(impressions: list[PersonaImpression]) -> list[PersonaImpression]:
+    """Lead with credit, WITHOUT faking the verdict.
 
-    Prompt-level generosity (personas.py) does the honest lifting most of the
-    time; this is the floor that guarantees the outcome when it doesn't."""
-    if not impressions or any(i.would_sign_up for i in impressions):
-        return impressions
-    # strongest = best resonated-minus-friction balance; ties → most resonated.
-    champion = max(impressions, key=lambda i: (len(i.what_resonated) - len(i.friction), len(i.what_resonated)))
-    win = champion.what_resonated[0] if champion.what_resonated else "the core value came through"
-    champion.would_sign_up = True
-    champion.reason = (
-        f"On balance the essentials are here — {win.rstrip('.').lower()} — enough to start; "
-        "the rest reads as room to grow, not a reason to walk away."
+    A founder-facing report should open with what genuinely worked — but it must
+    never fabricate a "would sign up" that no persona actually gave (that would
+    make the report's core signal a lie, the opposite of trustworthy). So we
+    leave every would_sign_up exactly as the persona judged it and instead ORDER
+    the panel so the strongest positive signal is surfaced first: a yes before a
+    no, then most-resonated-minus-friction, then most-resonated.
+
+    The honest softening lives in the prompts: personas.py leans generous and
+    frames friction as "what would raise confidence," and the synthesis
+    instruction keeps the tone observational. A rare unanimous "no" still reaches
+    the founder — framed kindly, not hidden behind a manufactured yes."""
+    return sorted(
+        impressions,
+        key=lambda i: (
+            i.would_sign_up,
+            len(i.what_resonated) - len(i.friction),
+            len(i.what_resonated),
+        ),
+        reverse=True,
     )
-    return impressions
 
 
 def _merge_node(state: PanelState) -> dict:
     """Fan-in: synthesize the final report from evidence + the panel's findings,
     then attach the validated impressions programmatically."""
-    impressions = _ensure_one_positive(state["impressions"])
+    impressions = _order_by_strength(state["impressions"])
     panel_context = "PERSONA PANEL FINDINGS (three visitors judged the same evidence):\n" + "\n".join(
         f"- {i.persona}: would sign up: {i.would_sign_up} — {i.reason} "
         f"| resonated: {'; '.join(i.what_resonated)} | friction: {'; '.join(i.friction)}"

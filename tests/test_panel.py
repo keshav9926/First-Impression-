@@ -69,24 +69,24 @@ def _neg(name: str, resonated: list[str]) -> PersonaImpression:
     )
 
 
-def test_ensure_one_positive_promotes_strongest_when_all_negative():
-    # Unanimous "no" must never ship — the strongest (most resonated) persona
-    # is promoted to a grounded yes so a founder-facing report leads with a win.
+def test_order_by_strength_never_fabricates_a_yes():
+    # Unanimous "no" must stay honest — NO verdict is flipped. The report leads
+    # with the strongest positive signal by ORDER, not by faking a sign-up.
     imps = [
         _neg("Technical Evaluator", ["docs"]),
         _neg("Business Buyer", ["pricing", "logos", "ROI"]),  # strongest signal
         _neg("First-Time End User", ["signup"]),
     ]
-    out = panel._ensure_one_positive(imps)
-    yes = [i for i in out if i.would_sign_up]
-    assert len(yes) == 1 and yes[0].persona == "Business Buyer"
-    assert "pricing" in yes[0].reason.lower()  # reason grounded in its own resonated item
+    out = panel._order_by_strength(imps)
+    assert all(not i.would_sign_up for i in out)  # no manufactured verdict
+    assert out[0].persona == "Business Buyer"  # strongest surfaced first
 
 
-def test_ensure_one_positive_leaves_existing_yes_untouched():
+def test_order_by_strength_surfaces_the_yes_first():
     imps = [_neg("A", ["x"]), _impression("B")]  # B already yes
-    out = panel._ensure_one_positive(imps)
-    assert [i.would_sign_up for i in out] == [False, True]  # no forced promotion
+    out = panel._order_by_strength(imps)
+    assert out[0].persona == "B"  # the honest yes leads
+    assert {i.persona: i.would_sign_up for i in out} == {"A": False, "B": True}  # verdicts intact
 
 
 def test_merge_passes_panel_findings_to_synthesis(monkeypatch):
@@ -115,7 +115,8 @@ def test_single_agent_path_clears_fabricated_panel(monkeypatch):
 
     fabricated = _empty_report()
     fabricated.persona_panel = [_impression("Fake")]
-    monkeypatch.setattr(report_mod.settings, "agent_provider", "groq")
+    # Non-panel path now always runs the NVIDIA pool driver (groq_driver.generate);
+    # no agent_provider switch to set.
     monkeypatch.setattr(report_mod.groq_driver, "generate", lambda: (fabricated, [], []))
     monkeypatch.setattr(report_mod, "apply_guards", lambda r: r)
     # Store must clear the evidence floor or generate_report refuses outright.
