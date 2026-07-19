@@ -1,0 +1,735 @@
+<title>FIE — First Impression Engine</title>
+<style>
+  /* ================================================================
+     FIE · FIRST IMPRESSION ENGINE — engineering datasheet
+     Monochrome · white sheet · black ink · mono-forward
+     Deliberately single-theme: this is a printed spec sheet.
+     Every per-company value lives in the REPORT object (see <script>);
+     the backend swaps that object per company — the chrome is fixed.
+     ================================================================ */
+
+  :root {
+    --paper:    #FBFAF7;
+    --surround: #EDECE7;
+    --ink:      #16150F;
+    --ink-2:    #46453D;
+    --muted:    #9A998E;
+    --hair:     rgba(22, 21, 15, 0.90);
+    --hair-2:   rgba(22, 21, 15, 0.20);
+    --hair-3:   rgba(22, 21, 15, 0.10);
+    --mark:     rgba(230, 202, 88, 0.55);  /* the one accent: a highlighter marker */
+    --sans: "Helvetica Neue", "Arial Nova", Arial, "Liberation Sans", sans-serif;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, "Liberation Mono", Menlo, monospace;
+    --fs: 12.5px;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--surround);
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: var(--fs);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    padding: clamp(0.5rem, 3vw, 2.5rem);
+  }
+
+  .sheet {
+    position: relative;
+    max-width: 1040px;
+    margin: 0 auto;
+    background: var(--paper);
+    border: 1.5px solid var(--ink);
+    padding: clamp(1.1rem, 3vw, 2.4rem);
+  }
+
+  /* printed-sheet corner register marks */
+  .reg { position: absolute; width: 13px; height: 13px; pointer-events: none; }
+  .reg.tl { top: 9px; left: 9px; border-top: 1.5px solid var(--ink); border-left: 1.5px solid var(--ink); }
+  .reg.tr { top: 9px; right: 9px; border-top: 1.5px solid var(--ink); border-right: 1.5px solid var(--ink); }
+  .reg.bl { bottom: 9px; left: 9px; border-bottom: 1.5px solid var(--ink); border-left: 1.5px solid var(--ink); }
+  .reg.br { bottom: 9px; right: 9px; border-bottom: 1.5px solid var(--ink); border-right: 1.5px solid var(--ink); }
+
+  .tnum { font-variant-numeric: tabular-nums; }
+  .sans { font-family: var(--sans); }
+  .mark { background: linear-gradient(to top, var(--mark) 42%, transparent 42%); padding: 0 0.06em; }
+  .fig { font-family: var(--mono); font-size: 0.56rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); text-align: center; margin-top: 0.55rem; }
+
+  .lbl { font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.7rem; color: var(--muted); font-weight: 500; }
+  .inv { background: var(--ink); color: var(--paper); padding: 0.05em 0.35em; }
+  .rule { height: 1px; background: var(--hair); border: 0; margin: 0; }
+  .dash { letter-spacing: 0.25em; color: var(--ink); font-weight: 700; }
+
+  svg { display: block; }
+  .ic { width: 26px; height: 26px; stroke: var(--ink); stroke-width: 1.4; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .ic-sm { width: 20px; height: 20px; }
+
+  /* ---------- MASTHEAD ---------- */
+  .top-strip { display: flex; justify-content: space-between; align-items: flex-start; font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.12em; color: var(--ink-2); padding-bottom: 0.9rem; }
+  .ruler { flex: 1; max-width: 360px; margin: 2px 1.5rem 0; display: flex; align-items: flex-end; gap: 3px; height: 13px; }
+  .ruler i { width: 1px; height: 4px; background: var(--hair-2); }
+  .ruler i.tall { height: 12px; background: var(--ink); }
+
+  /* subject banner — names who the report is for */
+  .subject-banner { border-top: 1px solid var(--hair); display: flex; justify-content: space-between; align-items: flex-end; gap: 1.5rem; flex-wrap: wrap; padding: 1.1rem 0 0.2rem; }
+  .subject-banner .sb-left { display: flex; flex-direction: column; gap: 0.3rem; }
+  .subject-banner .sb-co { font-family: var(--sans); font-weight: 800; font-size: clamp(1.6rem, 4vw, 2.4rem); line-height: 0.95; letter-spacing: -0.01em; text-transform: uppercase; }
+  .subject-banner .sb-dom { font-family: var(--mono); font-size: 0.74rem; letter-spacing: 0.1em; color: var(--muted); }
+  .subject-banner .sb-right { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.08em; color: var(--ink-2); text-align: right; text-transform: uppercase; }
+  .gut-note { font-family: var(--mono); font-size: 0.58rem; letter-spacing: 0.06em; color: var(--muted); margin-top: 0.6rem; line-height: 1.5; }
+  @media (max-width: 640px) { .ruler { display: none; } }
+
+  .mast { display: grid; grid-template-columns: 0.9fr 1.5fr 1.1fr; gap: clamp(1rem, 3vw, 2.4rem); padding: 0.4rem 0 1.4rem; align-items: start; }
+  .mast-left { display: flex; flex-direction: column; gap: 0.9rem; }
+  .crosshair { width: 30px; height: 30px; }
+  .headline { font-family: var(--sans); font-weight: 800; font-size: clamp(1.35rem, 2.9vw, 1.9rem); line-height: 1.02; letter-spacing: -0.01em; text-transform: uppercase; margin: 0; }
+  .headline .fade { color: var(--muted); }
+  .creed { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.1em; line-height: 1.85; text-transform: uppercase; color: var(--ink); }
+  .barcode { height: 30px; display: flex; align-items: stretch; gap: 1px; max-width: 200px; }
+  .barcode i { background: var(--ink); }
+
+  .mast-center { display: flex; flex-direction: column; }
+  .mast-center .wordmark { font-family: var(--sans); font-weight: 600; font-size: clamp(5rem, 17vw, 12rem); line-height: 0.82; letter-spacing: -0.03em; margin: 0.1rem 0 0.15rem; }
+  .mast-center .engine { font-family: var(--sans); font-weight: 500; text-transform: uppercase; letter-spacing: 0.02em; font-size: clamp(1.1rem, 2.6vw, 1.7rem); }
+  .mast-center .creed2 { margin-top: 1.1rem; font-family: var(--mono); font-size: 0.82rem; letter-spacing: 0.04em; line-height: 1.75; }
+
+  .mast-right { display: flex; flex-direction: column; gap: 0.9rem; align-items: flex-end; }
+  .genstamp { font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.1em; color: var(--ink-2); text-align: right; }
+  .spec { width: 100%; font-family: var(--mono); font-size: 0.72rem; }
+  .spec .row { display: flex; justify-content: space-between; gap: 1rem; padding: 0.12rem 0; letter-spacing: 0.06em; }
+  .spec .k { color: var(--muted); text-transform: uppercase; }
+  .spec .v { color: var(--ink); text-align: right; }
+  .dotmatrix { width: 100%; display: grid; gap: 4px; justify-content: end; }
+  .dotmatrix i { width: 3px; height: 3px; border-radius: 50%; background: var(--ink); }
+  .dotmatrix i.off { background: var(--hair-2); }
+
+  /* ---------- ABOUT / WHO WE ARE ---------- */
+  .about { border-top: 1px solid var(--hair); padding: 1.4rem 0; }
+  .about-grid { display: grid; grid-template-columns: 128px 1fr; gap: 1.5rem; }
+  .about p { font-family: var(--sans); font-size: 0.96rem; line-height: 1.55; max-width: 68ch; color: var(--ink-2); margin: 0; }
+  .about p b { color: var(--ink); font-weight: 600; }
+  .agentic { font-family: var(--sans); font-weight: 700; font-size: 1.08rem; line-height: 1.4; color: var(--ink); margin: 0 0 0.85rem; max-width: 60ch; }
+  .principles { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem; }
+  .principles span { font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.1em; text-transform: uppercase; border: 1px solid var(--hair-2); padding: 0.3rem 0.55rem; color: var(--ink); }
+  .principles span.key { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  .madeby { margin-top: 1.1rem; font-family: var(--mono); font-size: 0.74rem; letter-spacing: 0.06em; color: var(--ink-2); display: flex; gap: 0.9rem; flex-wrap: wrap; align-items: center; }
+  .madeby .reach { font-size: 0.62rem; letter-spacing: 0.18em; text-transform: uppercase; color: var(--paper); background: var(--ink); padding: 0.28rem 0.5rem; }
+  .madeby .nm-name { color: var(--ink); font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; }
+  .madeby .sep { color: var(--hair-2); }
+  .madeby a { border-bottom: 1px solid var(--hair-2); }
+  .madeby a:hover { border-color: var(--ink); }
+
+  /* ---------- STATS BAR ---------- */
+  .stats { display: grid; grid-template-columns: repeat(5, auto) 1fr; gap: clamp(0.8rem, 2.5vw, 2rem); align-items: center; border-top: 1px solid var(--hair); border-bottom: 1px solid var(--hair); padding: 1.1rem 0; }
+  .stat { display: flex; flex-direction: column; gap: 0.5rem; min-width: 62px; }
+  .stat .big { font-family: var(--sans); font-weight: 700; font-size: 1.6rem; line-height: 1; }
+  .stat .big.sm { font-size: 1.05rem; padding-top: 0.35rem; }
+  .stat .cap { font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); line-height: 1.4; }
+  .scorebox { border: 1px solid var(--ink); padding: 0.9rem 1.1rem; display: grid; grid-template-columns: 1fr auto; gap: 0.3rem 1rem; align-items: center; }
+  .scorebox .cap { grid-column: 1 / -1; font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+  .scorebox .num { font-family: var(--sans); font-weight: 800; font-size: clamp(2.8rem, 7vw, 4.2rem); line-height: 0.85; letter-spacing: -0.03em; }
+  .scorebox .num small { font-family: var(--mono); font-size: 1rem; font-weight: 400; color: var(--muted); letter-spacing: 0; }
+  .scorebox .pot { font-family: var(--mono); font-size: 0.8rem; letter-spacing: 0.1em; text-transform: uppercase; text-align: right; line-height: 1.3; }
+  .scoremeter { grid-column: 1 / -1; display: flex; gap: 5px; margin-top: 0.5rem; }
+  .scoremeter i { width: 11px; height: 11px; border-radius: 50%; background: var(--hair-2); }
+  .scoremeter i.on { background: var(--ink); }
+
+  /* ---------- SECTION SCAFFOLD ---------- */
+  .sec { border-top: 1px solid var(--hair); padding: 1.5rem 0; }
+  .sec-grid { display: grid; grid-template-columns: 128px 1fr; gap: 1.5rem; }
+  .gut .no { font-family: var(--sans); font-weight: 800; font-size: 2.2rem; line-height: 0.9; }
+  .gut .nm { font-family: var(--sans); font-weight: 700; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.02em; margin-top: 0.5rem; line-height: 1.15; }
+
+  .persona-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: clamp(1rem, 3vw, 2.4rem); }
+  .persona .phead { display: flex; align-items: center; gap: 0.6rem; }
+  .persona .pname { font-family: var(--sans); font-weight: 700; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  .dots { display: flex; gap: 4px; margin: 0.7rem 0; flex-wrap: wrap; }
+  .dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--hair-2); }
+  .dots i.on { background: var(--ink); }
+  .persona p { font-family: var(--sans); font-size: 0.92rem; line-height: 1.45; color: var(--ink-2); margin: 0.4rem 0 0.9rem; }
+  .persona .vs-lbl { font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+  .persona .vs-val { font-family: var(--sans); font-weight: 700; font-size: 1.5rem; }
+  .persona .vs-val span { font-size: 0.9rem; color: var(--muted); font-weight: 400; }
+
+  .exec-grid { display: grid; grid-template-columns: 1.55fr 0.5fr; gap: 2rem; align-items: stretch; }
+  .exec p { font-family: var(--sans); font-size: 1.02rem; line-height: 1.6; max-width: 52ch; margin: 0; }
+  .plusgrid { font-family: var(--mono); color: var(--ink-2); font-size: 0.95rem; line-height: 1.55; letter-spacing: 0.42em; text-align: right; white-space: pre; align-self: stretch; }
+
+  .sr-grid { display: grid; grid-template-columns: 128px 1fr 220px 128px 1fr; gap: 1.2rem; align-items: start; }
+  .itemlist { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.7rem; }
+  .itemlist li { display: grid; grid-template-columns: 20px 1fr; gap: 0.6rem; align-items: start; font-family: var(--sans); font-size: 0.9rem; line-height: 1.35; color: var(--ink-2); }
+  .itemlist .sym { position: relative; width: 15px; height: 15px; border-radius: 50%; border: 1.4px solid var(--ink); display: grid; place-items: center; margin-top: 0.15rem; }
+  .itemlist .sym::before { content: ""; width: 7px; height: 1.4px; background: var(--ink); }
+  .itemlist.plus .sym::after { content: ""; width: 1.4px; height: 7px; background: var(--ink); position: absolute; }
+  .diagram { display: grid; place-items: center; align-self: center; }
+
+  .iq-grid { display: grid; grid-template-columns: 128px 1fr 128px 1fr; gap: 1.2rem; align-items: start; }
+  .imp { list-style: none; margin: 0; padding: 0; }
+  .imp li { display: grid; grid-template-columns: 22px 1fr auto auto; gap: 0.8rem; align-items: center; padding: 0.55rem 0; border-bottom: 1px solid var(--hair-3); }
+  .imp .n { font-family: var(--mono); font-size: 0.62rem; color: var(--paper); background: var(--ink); width: 18px; height: 18px; display: grid; place-items: center; }
+  .imp .t { font-family: var(--sans); font-size: 0.9rem; line-height: 1.3; }
+  .imp .impact { font-family: var(--mono); font-size: 0.6rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+  .qs { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.75rem; }
+  .qs li { display: grid; grid-template-columns: 22px 1fr; gap: 0.7rem; align-items: start; font-family: var(--sans); font-size: 0.9rem; line-height: 1.35; color: var(--ink-2); }
+  .qmark { width: 17px; height: 17px; border-radius: 50%; border: 1.4px solid var(--ink); display: grid; place-items: center; font-family: var(--mono); font-size: 0.62rem; font-weight: 700; color: var(--ink); margin-top: 0.1rem; }
+
+  .verdict-grid { display: grid; grid-template-columns: 128px 1.3fr 0.7fr; gap: 1.5rem; align-items: start; }
+  .verdict-h { font-family: var(--sans); font-weight: 800; text-transform: uppercase; font-size: clamp(1.9rem, 4.6vw, 3rem); line-height: 0.96; letter-spacing: -0.02em; margin: 0; }
+  .verdict-sub { font-family: var(--sans); font-size: 0.92rem; line-height: 1.45; color: var(--ink-2); max-width: 52ch; margin: 0.9rem 0 1.3rem; }
+  .recbox { border: 1px solid var(--ink); padding: 0.9rem 1.1rem; }
+  .recbox .rtitle { font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.8rem; }
+  .rec-cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+  .rec-cols .rk { font-family: var(--mono); font-size: 0.6rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+  .rec-cols .rv { font-family: var(--sans); font-weight: 700; font-size: 1.05rem; margin: 0.25rem 0 0.5rem; }
+  .burst { display: grid; place-items: center; }
+
+  .pipe-wrap { overflow-x: auto; }
+  .pipe { display: flex; align-items: stretch; gap: 0; min-width: 760px; }
+  .pstep { flex: 1; display: flex; flex-direction: column; gap: 0.45rem; padding-right: 0.4rem; }
+  .pstep .pname { font-family: var(--sans); font-weight: 700; font-size: 0.68rem; letter-spacing: 0.06em; text-transform: uppercase; }
+  .pstep .pdesc { font-family: var(--sans); font-size: 0.68rem; line-height: 1.32; color: var(--ink-2); }
+  .pstep .ptime { font-family: var(--mono); font-size: 0.6rem; color: var(--muted); letter-spacing: 0.04em; margin-top: auto; padding-top: 0.4rem; }
+  .parrow { display: grid; place-items: center; padding-top: 6px; color: var(--muted); }
+  .pipe-foot { display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-top: 1.1rem; padding-top: 0.8rem; border-top: 1px solid var(--hair-3); font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.08em; color: var(--ink-2); }
+  .pipe-foot b { color: var(--ink); }
+
+  .ev-grid { display: grid; grid-template-columns: 128px 0.9fr 0.9fr 1.1fr; gap: 1.6rem; align-items: start; }
+  .cov { display: flex; gap: 1rem; align-items: center; }
+  .cov .stats2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem 1rem; }
+  .cov .stats2 .big { font-family: var(--sans); font-weight: 700; font-size: 1.2rem; line-height: 1; }
+  .cov .stats2 .cap { font-family: var(--mono); font-size: 0.58rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .pglist { list-style: none; margin: 0; padding: 0; font-family: var(--mono); font-size: 0.72rem; }
+  .pglist li { display: grid; grid-template-columns: 1fr auto auto; gap: 0.5rem; align-items: center; padding: 0.16rem 0; }
+  .pglist .path { color: var(--muted); }
+  .pglist .chk { width: 6px; height: 6px; border-radius: 50%; background: var(--ink); }
+  .cited { list-style: none; margin: 0; padding: 0; font-family: var(--mono); font-size: 0.7rem; }
+  .cited li { display: grid; grid-template-columns: 18px 1fr auto; gap: 0.5rem; align-items: center; padding: 0.22rem 0; }
+  .cited .cn { color: var(--muted); }
+  .cited .url { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cited .bar { display: flex; align-items: center; gap: 0.5rem; }
+  .cited .bar .b { height: 5px; background: var(--ink); }
+  .cited .bar .v { color: var(--ink-2); min-width: 18px; text-align: right; }
+  .sectitle { font-family: var(--sans); font-weight: 700; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.7rem; }
+
+  .foot { border-top: 1.5px solid var(--ink); margin-top: 0.5rem; padding-top: 0.9rem; display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.1em; color: var(--ink-2); }
+  .foot .center { color: var(--ink); }
+
+  a { color: inherit; text-decoration: none; }
+  a:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+  @media (max-width: 860px) {
+    .mast { grid-template-columns: 1fr; }
+    .mast-right { align-items: flex-start; }
+    .about-grid { grid-template-columns: 1fr; }
+    .stats { grid-template-columns: repeat(3, 1fr); }
+    .scorebox { grid-column: 1 / -1; }
+    .sr-grid { grid-template-columns: 1fr 1fr; }
+    .sr-grid .diagram { grid-column: 1 / -1; order: 9; }
+    .iq-grid { grid-template-columns: 1fr; }
+    .exec-grid, .verdict-grid, .ev-grid { grid-template-columns: 1fr; }
+    .persona-row { grid-template-columns: 1fr; }
+    .sec-grid { grid-template-columns: 1fr; gap: 0.8rem; }
+  }
+</style>
+
+<div class="sheet">
+  <span class="reg tl"></span><span class="reg tr"></span><span class="reg bl"></span><span class="reg br"></span>
+
+  <!-- ============ TOP STRIP ============ -->
+  <div class="top-strip">
+    <span class="dash">---</span>
+    <span class="ruler" id="ruler" aria-hidden="true"></span>
+    <span id="gen-strip">REPORT GENERATED &nbsp;•&nbsp; —</span>
+  </div>
+
+  <!-- ============ MASTHEAD ============ -->
+  <div class="mast">
+    <div class="mast-left">
+      <svg class="crosshair" viewBox="0 0 32 32" fill="none" stroke="var(--ink)" stroke-width="1.3">
+        <circle cx="16" cy="16" r="6"/><path d="M16 0v10M16 22v10M0 16h10M22 16h10"/>
+      </svg>
+      <h1 class="headline">Nature<br>doesn't<br>guess,<br><span class="fade">first-<br>impression-</span>does not<br>either.</h1>
+      <span class="dash">---</span>
+      <div class="creed">Public information.<br>Private insights.<br>No assumptions.<br>Only evidence.</div>
+      <div class="barcode" id="barcode" aria-hidden="true"></div>
+    </div>
+
+    <div class="mast-center">
+      <div class="wordmark">FIE</div>
+      <div class="engine">First Impression Engine™</div>
+      <div class="creed2">The first impression already exists.<br>We just make it <span class="inv">visible.</span></div>
+    </div>
+
+    <div class="mast-right">
+      <div class="genstamp">RECORD OF ANALYSIS</div>
+      <div class="dotmatrix" id="dotmatrix" aria-hidden="true"></div>
+      <div class="spec" id="spec"></div>
+    </div>
+  </div>
+
+  <!-- ============ WHO WE ARE ============ -->
+  <div class="about">
+    <div class="about-grid">
+      <div class="gut"><div class="no" style="font-size:1.2rem">◆</div><div class="nm">Who we<br>are</div></div>
+      <div>
+        <p class="agentic"><span class="mark">A complete, end-to-end agentic AI use case</span> — one autonomous pipeline that plans, crawls, retrieves, reasons and self-verifies, with no human in the loop.</p>
+        <p><b>FIE reads a company's public website the way a first-time visitor would</b> — then reports back what actually lands, what confuses, and what's missing. It doesn't guess at intent or invent facts: every observation is pulled from a real page and cited, and if the evidence is too thin to be fair, FIE says so rather than filling the gap. One grounded report per company — the same rigor a careful human reviewer would apply, run end to end by a multi-model pipeline.</p>
+        <div class="principles">
+          <span class="key">End-to-end agentic AI</span>
+          <span>Public data only</span>
+          <span>Grounded &amp; cited</span>
+          <span>Observational, not advisory</span>
+          <span>Multi-model consensus</span>
+          <span>Refuses thin evidence</span>
+        </div>
+        <div class="madeby">
+          <span class="reach">Reach out</span>
+          <span class="nm-name">Keshav Kakani</span>
+          <span class="sep">·</span>
+          <a id="mk-mail" href="#">email</a>
+          <span class="sep">·</span>
+          <a id="mk-gh" href="#" target="_blank" rel="noopener">github</a>
+          <span class="sep">·</span>
+          <span id="mk-phone">—</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ SUBJECT BANNER ============ -->
+  <div class="subject-banner">
+    <div class="sb-left">
+      <span class="lbl">First impression report prepared for</span>
+      <span class="sb-co" id="sb-co">—</span>
+      <span class="sb-dom" id="sb-dom">—</span>
+    </div>
+    <div class="sb-right" id="sb-right">—</div>
+  </div>
+
+  <!-- ============ STATS BAR ============ -->
+  <div class="stats">
+    <div class="stat">
+      <svg class="ic" viewBox="0 0 24 24"><path d="M6 2h9l3 3v17H6z"/><path d="M9 9h6M9 13h6M9 17h4"/></svg>
+      <div><div class="big tnum" id="st-pages">—</div><div class="cap">Pages<br>analyzed</div></div>
+    </div>
+    <div class="stat">
+      <svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.2"/><path d="M5.5 21c0-4 3-6 6.5-6s6.5 2 6.5 6"/></svg>
+      <div><div class="big tnum" id="st-personas">—</div><div class="cap">Personas<br>used</div></div>
+    </div>
+    <div class="stat">
+      <svg class="ic" viewBox="0 0 24 24"><circle cx="6" cy="8" r="1.8"/><circle cx="18" cy="6" r="1.8"/><circle cx="11" cy="16" r="1.8"/><circle cx="19" cy="17" r="1.8"/><path d="M7.6 8.8L9.4 15M16.4 6.7L12.6 15M12.8 16.3L17.2 16.8"/></svg>
+      <div><div class="big sm" id="st-mode">—</div><div class="cap">Analysis<br>mode</div></div>
+    </div>
+    <div class="stat">
+      <svg class="ic" viewBox="0 0 24 24"><path d="M12 3l8 4v10l-8 4-8-4V7z"/><path d="M12 3v18M4 7l8 4 8-4"/></svg>
+      <div><div class="big sm" id="st-models">—</div><div class="cap">Models<br>used</div></div>
+    </div>
+    <div class="stat">
+      <svg class="ic" viewBox="0 0 24 24"><path d="M4 20V13M9.3 20V8M14.6 20V4M20 20v-9"/></svg>
+      <div><div class="big tnum" id="st-progress">—</div><div class="cap">Analysis<br>progress</div></div>
+    </div>
+    <div class="scorebox">
+      <span class="cap">Overall impression score</span>
+      <div class="num tnum"><span id="score">0</span><small>/100</small></div>
+      <div class="pot" id="potential">—</div>
+      <div class="scoremeter" id="scoremeter" aria-hidden="true"></div>
+    </div>
+  </div>
+
+  <!-- ============ 01 PERSONAS ============ -->
+  <section class="sec">
+    <div class="sec-grid">
+      <div class="gut"><div class="no">01</div><div class="nm">Personas</div><div class="gut-note">● filled = stronger<br>verdict · out of 10</div></div>
+      <div class="persona-row" id="persona-row"></div>
+    </div>
+  </section>
+
+  <!-- ============ 02 EXECUTIVE SUMMARY ============ -->
+  <section class="sec">
+    <div class="sec-grid">
+      <div class="gut"><div class="no">02</div><div class="nm">Executive<br>summary</div></div>
+      <div class="exec-grid">
+        <div class="exec"><p id="exec-text">—</p></div>
+        <div class="plusgrid" id="plusgrid" aria-hidden="true"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 03 / 04 STRENGTHS + RISKS ============ -->
+  <section class="sec">
+    <div class="sr-grid">
+      <div class="gut"><div class="no">03</div><div class="nm">Strengths /<br>positives</div></div>
+      <ul class="itemlist plus" id="strengths-list"></ul>
+      <div class="diagram">
+        <svg width="200" height="180" viewBox="0 0 200 180" fill="none" stroke="var(--hair-2)" stroke-width="1">
+          <path d="M20 120 L100 150 L180 120 L100 96 Z"/>
+          <path d="M40 111 L100 133 M60 103 L100 118 M140 111 L100 133 M120 103 L100 118"/>
+          <path d="M20 120 L100 96 M180 120 L100 96" stroke="var(--hair-3)"/>
+          <g stroke="var(--ink)" stroke-width="1.6"><path d="M100 120 L100 30"/><path d="M97 38 L100 28 L103 38"/></g>
+          <g stroke="var(--ink-2)" stroke-width="1.4"><path d="M100 120 L36 96"/><path d="M43 91 L33 95 L40 101"/><path d="M100 120 L164 96"/><path d="M157 91 L167 95 L160 101"/></g>
+          <circle cx="100" cy="120" r="2.4" fill="var(--ink)" stroke="none"/>
+        </svg>
+        <div class="fig">Fig. 01 — Strength vectors</div>
+      </div>
+      <div class="gut"><div class="no">04</div><div class="nm">Risks /<br>friction points</div></div>
+      <ul class="itemlist" id="risks-list"></ul>
+    </div>
+  </section>
+
+  <!-- ============ 05 / 06 IMPROVEMENTS + QUESTIONS ============ -->
+  <section class="sec">
+    <div class="iq-grid">
+      <div class="gut"><div class="no">05</div><div class="nm">Top<br>improvement<br>ideas</div></div>
+      <ul class="imp" id="imp-list"></ul>
+      <div class="gut"><div class="no">06</div><div class="nm">Unanswered<br>questions</div></div>
+      <ul class="qs" id="qs-list"></ul>
+    </div>
+  </section>
+
+  <!-- ============ 07 FINAL VERDICT ============ -->
+  <section class="sec">
+    <div class="verdict-grid">
+      <div class="gut"><div class="no">07</div><div class="nm">Final<br>verdict</div></div>
+      <div>
+        <h2 class="verdict-h" id="verdict-h">—</h2>
+        <p class="verdict-sub" id="verdict-sub">—</p>
+        <div class="recbox">
+          <div class="rtitle">Recommendation priority</div>
+          <div class="rec-cols" id="rec-cols"></div>
+        </div>
+      </div>
+      <div class="burst"><canvas id="burst" width="220" height="220" style="max-width:100%"></canvas><div class="fig">Fig. 02 — Citation density</div></div>
+    </div>
+  </section>
+
+  <!-- ============ 08 HOW IT WORKS (trust pipeline) ============ -->
+  <section class="sec">
+    <div class="sec-grid">
+      <div class="gut"><div class="no">08</div><div class="nm">How the<br>analysis<br>works</div></div>
+      <div>
+        <div class="pipe-wrap"><div class="pipe" id="pipe"></div></div>
+        <div class="pipe-foot">
+          <span>TOTAL EXECUTION TIME &nbsp;·&nbsp; <b>~6 – 12 MINUTES</b></span>
+          <span>EVERY CLAIM CITED &nbsp;·&nbsp; <b>NOTHING INVENTED</b></span>
+          <span>MODELS: <b id="pipe-models">—</b></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 09 EVIDENCE & CITATIONS ============ -->
+  <section class="sec">
+    <div class="ev-grid">
+      <div class="gut"><div class="no">09</div><div class="nm">Evidence &amp;<br>citations</div></div>
+      <div>
+        <div class="sectitle">Coverage overview</div>
+        <div class="cov">
+          <svg width="72" height="72" viewBox="0 0 72 72">
+            <circle cx="36" cy="36" r="30" fill="none" stroke="var(--hair-2)" stroke-width="7"/>
+            <circle id="donut" cx="36" cy="36" r="30" fill="none" stroke="var(--ink)" stroke-width="7" transform="rotate(-90 36 36)"/>
+            <text id="donut-pct" x="36" y="34" text-anchor="middle" font-family="var(--sans)" font-size="15" font-weight="700" fill="var(--ink)">—</text>
+            <text x="36" y="46" text-anchor="middle" font-family="var(--mono)" font-size="6" letter-spacing="1" fill="var(--muted)">COVERAGE</text>
+          </svg>
+          <div class="stats2">
+            <div><div class="big tnum" id="cv-pages">—</div><div class="cap">Pages</div></div>
+            <div><div class="big tnum" id="cv-sources">—</div><div class="cap">Sources</div></div>
+            <div><div class="big tnum" id="cv-chunks">—</div><div class="cap">Chunks</div></div>
+            <div><div class="big tnum" id="cv-citations">—</div><div class="cap">Citations</div></div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="sectitle">Crawled pages</div>
+        <ul class="pglist" id="pglist"></ul>
+      </div>
+      <div>
+        <div class="sectitle">Top cited sources</div>
+        <ul class="cited" id="cited"></ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FOOTER ============ -->
+  <div class="foot">
+    <span>EST. 2025</span>
+    <span class="center">FIRST IMPRESSION ENGINE™ &nbsp;•&nbsp; AI-POWERED STARTUP ANALYSIS</span>
+    <span>REPORT VERSION 1.0</span>
+  </div>
+</div>
+
+<script>
+  // ============================================================
+  //  PROJECT-LEVEL CONSTANTS  (fixed across every company)
+  // ============================================================
+  var MAKER = {
+    name: "Keshav Kakani",
+    email: "kkakani160@gmail.com",
+    github: "https://github.com/keshav9926", // <-- confirm / change
+    phone: "+91 90240 99116"
+  };
+
+  // The trust pipeline is a property of the ENGINE, not the company.
+  var PIPELINE = [
+    ["Discover",   "Take a public URL. robots.txt is checked before anything is fetched — public data only.", "~5-10s"],
+    ["Crawl",      "Robots-respecting crawl; auto-escalates to a JS render for SPA / Framer sites.",           "~1-3 min"],
+    ["Sanitize",   "Strip nav & boilerplate; neutralize any prompt-injection hidden in page text.",           "~10-20s"],
+    ["Chunk",      "Split into semantic chunks (500–1200 tokens) with overlap so context survives.",          "~20-40s"],
+    ["Embed",      "NVIDIA embeddings → local Chroma vector store, one company at a time.",                    "~1-2 min"],
+    ["Retrieve",   "Hybrid recall: dense + BM25 → RRF fusion → cross-encoder rerank → relevance gate.",        "~10-20s"],
+    ["Explore",    "A ReAct agent + three personas read the evidence like real first-time visitors.",          "~1-2 min"],
+    ["Synthesize", "Schema-constrained JSON — every claim must name the exact source page it came from.",       "~30-60s"],
+    ["Verify",     "Citation check + groundedness judge. If evidence is too thin, FIE refuses instead of guessing.", "~20-40s"]
+  ];
+
+  // ============================================================
+  //  PER-COMPANY REPORT  — the backend produces ONE of these per
+  //  company from the FirstImpressionReport schema, then renders
+  //  this template against it. Swap this object → whole page changes.
+  //  (Values below are DEMO data.)
+  // ============================================================
+  var REPORT = {
+    company:    "Vortexify",
+    subject:    "vortexify.ai",
+    generated:  "MAY 17, 2025  •  03:24 PM",
+    reportId:   "FIE-17052025-01",
+    build:      "1705.02",
+    modelStack: "DeepSeek R1 | GLM-4 | NV-Embed",
+    score:      82,
+    potential:  "Strong potential",
+    stats: { pages: 15, personas: 3, mode: "DEEP", models: "DeepSeek R1 + GLM-4", progress: "100%" },
+
+    personas: [
+      { role: "briefcase", name: "Business buyer",     strength: 7.8, dots: 5,
+        text: "Sees strong ROI and value. Needs more social proof and case studies." },
+      { role: "code",      name: "Technical evaluator", strength: 5.6, dots: 4,
+        text: "Technical depth is solid but docs and integrations lack detail." },
+      { role: "person",    name: "First-time end user", strength: 4.3, dots: 3,
+        text: "Too technical and unclear onboarding path for new users." }
+    ],
+
+    execSummary: "FIE analysis shows exceptional product design and engineering depth, combining high-end aesthetics with functional simplicity. However, the current website does not effectively communicate the value proposition to new or non-technical visitors. Strengthening clarity, trust signals, and onboarding guidance should be the top priority.",
+
+    strengths: [
+      "Premium product design and visual identity",
+      "Strong emphasis on durability and craftsmanship",
+      "Clean, distraction-free user interface",
+      "Good use of high-quality product photography",
+      "Brand story and positioning are unique"
+    ],
+    risks: [
+      "Limited social proof (no testimonials / case studies)",
+      "Lack of detailed product specifications",
+      "Unclear value for first-time visitors",
+      "Missing FAQ and support resources",
+      "No clear pricing or availability information"
+    ],
+    improvements: [
+      { text: "Add customer testimonials and case studies",  impact: "High impact",   dots: 5 },
+      { text: "Create a beginner-friendly quick start guide", impact: "High impact",   dots: 4 },
+      { text: "Simplify the homepage message",                impact: "Medium impact", dots: 4 },
+      { text: "Improve transparency around pricing",          impact: "Medium impact", dots: 3 },
+      { text: "Add API documentation and code examples",      impact: "Medium impact", dots: 3 }
+    ],
+    questions: [
+      "What are the return and warranty policies?",
+      "How does the product compare to competitors?",
+      "Is there an API reference or endpoint documentation available?",
+      "Are there any enterprise case studies or ROI metrics?",
+      "What is the data residency and compliance coverage?"
+    ],
+    verdict: {
+      line1: "Strong product.",
+      line2: "Weak communication.",
+      sub:   "A compelling product and brand identity, but the website does not effectively communicate its value to all audiences. Improve clarity, trust signals, and user guidance.",
+      rec: [ { k: "Impact", v: "High", dots: 4 }, { k: "Effort", v: "Medium", dots: 3 }, { k: "Timeline", v: "2–4 weeks", dots: 4 } ]
+    },
+    coverage: { pct: 92, pages: 15, sources: 44, chunks: 682, citations: "1,248" },
+    crawledPages: [
+      ["Homepage", "/"], ["Products", "/products"], ["Pricing", "/pricing"],
+      ["Documentation", "/docs"], ["Blog", "/blog"], ["Changelog", "/changelog"],
+      ["Careers", "/careers"], ["Terms", "/terms"], ["Privacy", "/privacy"]
+    ],
+    citedSources: [
+      ["https://vortexify.ai", 28], ["https://vortexify.ai/docs", 22],
+      ["https://vortexify.ai/pricing", 18], ["https://vortexify.ai/blog", 14],
+      ["https://vortexify.ai/changelog", 11]
+    ]
+  };
+
+  // ============================================================
+  //  RENDER  — pure function of (REPORT, PIPELINE, MAKER)
+  // ============================================================
+  (function () {
+    var $ = function (id) { return document.getElementById(id); };
+    var esc = function (s) { return String(s).replace(/[&<>]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]; }); };
+    var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    function dotsHTML(on, total) { var h = ""; for (var i = 0; i < total; i++) h += '<i class="' + (i < on ? "on" : "") + '"></i>'; return h; }
+    var PERSONA_ICON = {
+      briefcase: '<rect x="3" y="7" width="18" height="13" rx="1"/><path d="M8.5 7V4.5h7V7"/><path d="M3 12h18"/>',
+      code: '<path d="M9 8l-4 4 4 4M15 8l4 4-4 4"/>',
+      person: '<circle cx="12" cy="8" r="3.2"/><path d="M5.5 21c0-4 3-6 6.5-6s6.5 2 6.5 6"/>'
+    };
+
+    // ---- maker credit ----
+    $("mk-mail").textContent = MAKER.email;
+    $("mk-mail").href = "mailto:" + MAKER.email;
+    $("mk-gh").textContent = MAKER.github.replace(/^https?:\/\//, "");
+    $("mk-gh").href = MAKER.github;
+    $("mk-phone").textContent = MAKER.phone;
+
+    // ---- subject banner ----
+    $("sb-co").textContent = REPORT.company;
+    $("sb-dom").textContent = REPORT.subject;
+    $("sb-right").innerHTML = REPORT.stats.pages + " pages &nbsp;·&nbsp; " + REPORT.coverage.pct + "% coverage &nbsp;·&nbsp; " + REPORT.stats.mode + " analysis";
+
+    // ---- top ruler ticks ----
+    var ruler = $("ruler");
+    for (var t = 0; t <= 40; t++) { var tk = document.createElement("i"); if (t % 5 === 0) tk.className = "tall"; ruler.appendChild(tk); }
+
+    // ---- masthead meta ----
+    $("gen-strip").innerHTML = "REPORT GENERATED &nbsp;•&nbsp; " + esc(REPORT.generated);
+    $("spec").innerHTML =
+      row("Subject", REPORT.subject) + row("Report ID", REPORT.reportId) +
+      row("Engine", "FIE™ v1.0") + '<div class="row"><span class="k">Status</span><span class="v"><span class="inv">VERIFIED</span></span></div>' +
+      row("Build", REPORT.build) + row("Model stack", REPORT.modelStack);
+    function row(k, v) { return '<div class="row"><span class="k">' + esc(k) + '</span><span class="v">' + esc(v) + '</span></div>'; }
+
+    // ---- stats ----
+    $("st-pages").textContent = REPORT.stats.pages;
+    $("st-personas").textContent = REPORT.stats.personas;
+    $("st-mode").textContent = REPORT.stats.mode;
+    $("st-models").textContent = REPORT.stats.models;
+    $("st-progress").textContent = REPORT.stats.progress;
+    $("potential").innerHTML = esc(REPORT.potential).replace(" ", "<br>");
+    $("pipe-models").textContent = REPORT.modelStack;
+
+    // ---- personas ----
+    $("persona-row").innerHTML = REPORT.personas.map(function (p) {
+      return '<div class="persona"><div class="phead"><svg class="ic ic-sm" viewBox="0 0 24 24">' +
+        (PERSONA_ICON[p.role] || PERSONA_ICON.person) + '</svg><span class="pname">' + esc(p.name) + '</span></div>' +
+        '<div class="dots">' + dotsHTML(p.dots, 7) + '</div>' +
+        '<p>' + esc(p.text) + '</p>' +
+        '<div class="vs-lbl">Verdict strength</div>' +
+        '<div class="vs-val tnum">' + p.strength + ' <span>/ 10</span></div></div>';
+    }).join("");
+
+    // ---- exec summary ----
+    $("exec-text").textContent = REPORT.execSummary;
+
+    // ---- strengths / risks ----
+    $("strengths-list").innerHTML = REPORT.strengths.map(function (s) { return '<li><span class="sym"></span><span>' + esc(s) + '</span></li>'; }).join("");
+    $("risks-list").innerHTML = REPORT.risks.map(function (s) { return '<li><span class="sym"></span><span>' + esc(s) + '</span></li>'; }).join("");
+
+    // ---- improvements ----
+    $("imp-list").innerHTML = REPORT.improvements.map(function (im, i) {
+      return '<li><span class="n">' + String(i + 1).padStart(2, "0") + '</span>' +
+        '<span class="t">' + esc(im.text) + '</span>' +
+        '<span class="impact">' + esc(im.impact) + '</span>' +
+        '<span class="dots">' + dotsHTML(im.dots, 6) + '</span></li>';
+    }).join("");
+
+    // ---- questions ----
+    $("qs-list").innerHTML = REPORT.questions.map(function (q) { return '<li><span class="qmark">?</span><span>' + esc(q) + '</span></li>'; }).join("");
+
+    // ---- verdict ----
+    $("verdict-h").innerHTML = esc(REPORT.verdict.line1) + "<br>" + esc(REPORT.verdict.line2);
+    $("verdict-sub").textContent = REPORT.verdict.sub;
+    $("rec-cols").innerHTML = REPORT.verdict.rec.map(function (r) {
+      return '<div><div class="rk">' + esc(r.k) + '</div><div class="rv">' + esc(r.v) + '</div><div class="dots">' + dotsHTML(r.dots, 6) + '</div></div>';
+    }).join("");
+
+    // ---- coverage ----
+    $("donut-pct").textContent = REPORT.coverage.pct + "%";
+    $("cv-pages").textContent = REPORT.coverage.pages;
+    $("cv-sources").textContent = REPORT.coverage.sources;
+    $("cv-chunks").textContent = REPORT.coverage.chunks;
+    $("cv-citations").textContent = REPORT.coverage.citations;
+    var donut = $("donut"), C = 2 * Math.PI * 30;
+    donut.setAttribute("stroke-dasharray", C);
+    donut.setAttribute("stroke-dashoffset", C * (1 - REPORT.coverage.pct / 100));
+
+    // ---- crawled pages ----
+    $("pglist").innerHTML = REPORT.crawledPages.map(function (p) {
+      return '<li><span>' + esc(p[0]) + '</span><span class="path">' + esc(p[1]) + '</span><span class="chk"></span></li>';
+    }).join("");
+
+    // ---- top cited sources ----
+    var maxV = Math.max.apply(null, REPORT.citedSources.map(function (s) { return s[1]; }));
+    $("cited").innerHTML = REPORT.citedSources.map(function (s, i) {
+      return '<li><span class="cn">' + String(i + 1).padStart(2, "0") + '</span>' +
+        '<span class="url">' + esc(s[0]) + '</span>' +
+        '<span class="bar"><span class="b" style="width:' + (s[1] / maxV * 70 + 8) + 'px"></span><span class="v tnum">' + s[1] + '</span></span></li>';
+    }).join("");
+
+    // ---- pipeline (engine-level, fixed) ----
+    var ICONS = [
+      '<circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c3 3 3 13 0 16M12 4c-3 3-3 13 0 16"/>',
+      '<path d="M12 3v11M8 10l4 4 4-4"/><path d="M4 19h16"/>',
+      '<path d="M4 5h16l-6 7v6l-4 2v-8z"/>',
+      '<rect x="4" y="4" width="7" height="7"/><rect x="13" y="4" width="7" height="7"/><rect x="4" y="13" width="7" height="7"/><rect x="13" y="13" width="7" height="7"/>',
+      '<path d="M12 3l8 4v10l-8 4-8-4V7z"/><path d="M12 3v18"/>',
+      '<circle cx="10" cy="10" r="6"/><path d="M15 15l5 5"/>',
+      '<circle cx="6" cy="8" r="1.7"/><circle cx="18" cy="7" r="1.7"/><circle cx="11" cy="16" r="1.7"/><path d="M7.5 8.6l3 6.6M16.4 7.7l-4.6 7"/>',
+      '<path d="M5 5v6a4 4 0 004 4h6"/><path d="M15 11l4 4-4 4"/>',
+      '<path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/><path d="M9 12l2 2 4-4"/>'
+    ];
+    var arrow = '<div class="parrow"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M2 8h11M9 4l4 4-4 4"/></svg></div>';
+    $("pipe").innerHTML = PIPELINE.map(function (s, i) {
+      var step = '<div class="pstep"><svg class="ic" style="width:24px;height:24px" viewBox="0 0 24 24">' + ICONS[i] + '</svg>' +
+        '<div class="pname">' + esc(s[0]) + '</div><div class="pdesc">' + esc(s[1]) + '</div><div class="ptime">' + esc(s[2]) + '</div></div>';
+      return step + (i < PIPELINE.length - 1 ? arrow : "");
+    }).join("");
+
+    // ---- decorative: barcode ----
+    var bc = $("barcode");
+    for (var i = 0; i < 46; i++) { var b = document.createElement("i"); b.style.width = (Math.random() < 0.5 ? 1 : (Math.random() < 0.6 ? 2 : 3)) + "px"; b.style.opacity = Math.random() < 0.12 ? 0 : 1; bc.appendChild(b); }
+
+    // ---- decorative: masthead dot matrix ----
+    var dm = $("dotmatrix"), COLS = 11, ROWS = 6;
+    dm.style.gridTemplateColumns = "repeat(" + COLS + ", 3px)";
+    for (var d = 0; d < COLS * ROWS; d++) { var dot = document.createElement("i"); if (Math.random() < 0.28) dot.className = "off"; dm.appendChild(dot); }
+
+    // ---- decorative: plus grid — narrow columns, filled to cover the
+    //      full height of the executive-summary block beside it ----
+    var plus = $("plusgrid"), execBox = document.querySelector(".exec");
+    function fillPlus() {
+      var h = execBox.offsetHeight;
+      var lh = parseFloat(getComputedStyle(plus).lineHeight) || 20;
+      var rowsN = Math.max(4, Math.round(h / lh));
+      var out = []; for (var r = 0; r < rowsN; r++) out.push(new Array(8).fill("+").join("  "));
+      plus.textContent = out.join("\n");
+    }
+    fillPlus();
+    if (window.ResizeObserver) { new ResizeObserver(fillPlus).observe(execBox); }
+    else { window.addEventListener("resize", fillPlus); }
+
+    // ---- score meter + count-up ----
+    var sm = $("scoremeter"), SEG = 15, lit = Math.round(REPORT.score / 100 * SEG);
+    for (var m = 0; m < SEG; m++) { var e = document.createElement("i"); if (m < lit) e.className = "on"; sm.appendChild(e); }
+    var scoreEl = $("score");
+    if (reduce) { scoreEl.textContent = REPORT.score; }
+    else {
+      var start = null, dur = 900;
+      requestAnimationFrame(function step(ts) {
+        if (!start) start = ts;
+        var p = Math.min((ts - start) / dur, 1);
+        scoreEl.textContent = Math.round((1 - Math.pow(1 - p, 3)) * REPORT.score);
+        if (p < 1) requestAnimationFrame(step);
+      });
+    }
+
+    // ---- decorative: radial burst ----
+    var cv = $("burst");
+    if (cv && cv.getContext) {
+      var ctx = cv.getContext("2d"), W = cv.width, H = cv.height, cx = W / 2, cy = H / 2;
+      var ink = getComputedStyle(document.documentElement).getPropertyValue("--ink").trim() || "#16150F";
+      ctx.fillStyle = ink;
+      for (var p2 = 0; p2 < 900; p2++) {
+        var ang = Math.random() * Math.PI * 2, rr = Math.pow(Math.random(), 2) * 100;
+        ctx.beginPath(); ctx.arc(cx + Math.cos(ang) * rr, cy + Math.sin(ang) * rr, rr < 30 ? 1.4 : 0.8, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+  })();
+</script>
