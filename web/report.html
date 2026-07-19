@@ -12,14 +12,17 @@
   :root {
     --pad: clamp(1.1rem, 3vw, 2.4rem);   /* sheet padding = section bleed */
 
-    /* warm off-white grounds — subtly differentiated per section */
-    --paper:    #F5F4F0;   /* main ground */
-    --surround: #E6E5DE;   /* desk behind the sheet */
-    --ivory:    #F8F4EA;   /* executive summary — warm ivory */
-    --gray:     #EFEFEA;   /* personas / ideas — cool light gray */
-    --neutral:  #ECEAE1;   /* evidence — slightly darker neutral */
-    --pipe-bg:  #EAF1EE;   /* pipeline — emerald-tinted strip */
-    --chip-bg:  #E1EDE7;   /* solid tint for pipeline icon wells */
+    /* warm off-white grounds — a rhythm of paper stocks, not one flat beige.
+       Every value is a whisper away from the next; the eye reads change, not colour. */
+    --paper:     #F5F4F0;   /* main ground */
+    --surround:  #E6E5DE;   /* desk behind the sheet */
+    --ivory:     #F8F4EA;   /* warm ivory */
+    --gray:      #EFEEE8;   /* neutral warm grey — personas */
+    --neutral:   #ECEAE1;   /* evidence — clean analytical neutral */
+    --teal-pale: #E9F1EE;   /* very pale teal — executive summary, pipeline */
+    --mint:      #ECF2ED;   /* soft mint — improvement ideas */
+    --pipe-bg:   #E9F1EE;   /* pipeline strip (= teal-pale) */
+    --chip-bg:   #DCEAE4;   /* solid tint for pipeline icon wells */
 
     /* ink hierarchy — headings dark, body softer, labels gray, meta muted */
     --ink:      #23231D;   /* headings / strong */
@@ -39,6 +42,16 @@
     --accent-line: rgba(0, 122, 94, 0.30);
     --burst:       #5FC7AA;   /* light accent for the on-dark citation burst */
     --mark:        rgba(0, 122, 94, 0.20);  /* highlighter, now accent-tinted */
+    --big-num:     rgba(0, 122, 94, 0.16);  /* massive recessive chapter numbers */
+
+    /* the ONE supporting accent — burnt orange / terracotta.
+       Used ONLY for negatives: risks, friction, low confidence, attention.
+       Everything positive or neutral stays emerald or ink. */
+    --warn:        #B4552F;
+    --warn-tint:   rgba(180, 85, 47, 0.08);
+    --warn-line:   rgba(180, 85, 47, 0.32);
+    --warn-num:    rgba(180, 85, 47, 0.16);
+    --warn-pale:   #F6EEE9;   /* very pale warm coral ground */
 
     --sans: "Helvetica Neue", "Arial Nova", Arial, "Liberation Sans", sans-serif;
     --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, "Liberation Mono", Menlo, monospace;
@@ -160,10 +173,10 @@
   .stat .big.sm { font-size: 1.05rem; padding-top: 0.35rem; }
   .stat .cap { font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); line-height: 1.4; }
   /* the score is the hero — tinted well, accent border rule, oversized accent number */
-  .scorebox { position: relative; overflow: hidden; border: 1px solid var(--accent-line); border-left: 3px solid var(--accent); border-radius: 4px; background: var(--accent-tint); padding: 0.9rem 1.1rem; display: grid; grid-template-columns: 1fr auto; gap: 0.3rem 1rem; align-items: center; }
-  .scorebox::before { content: ""; position: absolute; right: -30px; top: -30px; width: 90px; height: 90px; border-radius: 50%; background: var(--accent); opacity: 0.06; }
+  .scorebox { position: relative; overflow: hidden; border: 1px solid var(--accent-line); border-left: 4px solid var(--accent); border-radius: 4px; background: var(--accent-tint); padding: 0.95rem 1.2rem; display: grid; grid-template-columns: 1fr auto; gap: 0.3rem 1rem; align-items: center; box-shadow: 0 10px 26px -18px rgba(0, 122, 94, 0.5); }
+  .scorebox::before { content: ""; position: absolute; right: -34px; top: -34px; width: 104px; height: 104px; border-radius: 50%; background: var(--accent); opacity: 0.07; }
   .scorebox .cap { grid-column: 1 / -1; font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
-  .scorebox .num { font-family: var(--sans); font-weight: 800; font-size: clamp(2.8rem, 7vw, 4.2rem); line-height: 0.85; letter-spacing: -0.03em; color: var(--accent); }
+  .scorebox .num { font-family: var(--sans); font-weight: 800; font-size: clamp(3.2rem, 8vw, 5rem); line-height: 0.82; letter-spacing: -0.03em; color: var(--accent); }
   .scorebox .num small { font-family: var(--mono); font-size: 1rem; font-weight: 400; color: var(--muted); letter-spacing: 0; }
   .scorebox .pot { font-family: var(--mono); font-size: 0.8rem; letter-spacing: 0.1em; text-transform: uppercase; text-align: right; line-height: 1.3; color: var(--ink); }
   .scoremeter { grid-column: 1 / -1; display: flex; gap: 5px; margin-top: 0.5rem; }
@@ -173,20 +186,25 @@
   /* ---------- SECTION SCAFFOLD ---------- */
   .sec { border-top: 1px solid var(--hair); padding: 1.5rem 0; }
   .sec-grid { display: grid; grid-template-columns: 128px 1fr; gap: 1.5rem; }
-  .gut .no { font-family: var(--sans); font-weight: 800; font-size: 2.2rem; line-height: 0.9; color: var(--accent); font-variant-numeric: tabular-nums; }
-  .gut .nm { font-family: var(--sans); font-weight: 700; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.02em; margin-top: 0.5rem; line-height: 1.15; color: var(--label); }
+  /* massive, elegant, low-weight chapter markers — they read like a watermark
+     that belongs to the page, not a loud label sitting on top of it */
+  .gut .no { font-family: var(--sans); font-weight: 800; font-size: clamp(3.4rem, 6vw, 4.8rem); line-height: 0.82; color: var(--big-num); font-variant-numeric: tabular-nums; letter-spacing: -0.03em; }
+  .gut--warn .no { color: var(--warn-num); }
+  .gut .nm { font-family: var(--sans); font-weight: 700; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.02em; margin-top: 0.55rem; line-height: 1.15; color: var(--label); }
 
   /* ---------- SECTION BAND TINTS ----------
      Subtle per-section grounds that bleed to the sheet edge, giving the
      report a light → neutral → highlight rhythm instead of one flat white.
      padding-inline restores the content inset so every column stays aligned. */
   .band { margin-inline: calc(-1 * var(--pad)); padding-inline: var(--pad); }
-  .sec--personas { background: var(--gray); }
-  .sec--exec     { background: var(--ivory); }
-  .sec--iq       { background: var(--gray); }
-  .sec--pipe     { background: var(--pipe-bg); }
-  .sec--evidence { background: var(--neutral); }
-  .sec--verdict  { background: var(--accent-deep); border-top-color: transparent; }
+  /* rhythm:  grey → pale-teal → paper → mint → dark → pale-teal → neutral  */
+  .sec--personas { background: var(--gray); }       /* 01 neutral warm grey */
+  .sec--exec     { background: var(--teal-pale); }  /* 02 very pale teal     */
+  .sec--iq       { background: var(--mint); }       /* 05·06 soft mint       */
+  .sec--pipe     { background: var(--pipe-bg); }    /* 08 pale teal          */
+  .sec--evidence { background: var(--neutral); }    /* 09 clean analytical   */
+  .sec--verdict  { background: var(--accent-deep); border-top-color: transparent; }  /* 07 dark teal */
+  /* 03·04 strengths + risks stay on bare paper — the quiet minimal spread */
 
   .persona-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: clamp(1rem, 3vw, 2.4rem); }
   .persona .phead { display: flex; align-items: center; gap: 0.6rem; }
@@ -198,6 +216,9 @@
   .persona .vs-lbl { font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
   .persona .vs-val { font-family: var(--sans); font-weight: 700; font-size: 1.5rem; color: var(--accent); }
   .persona .vs-val span { font-size: 0.9rem; color: var(--muted); font-weight: 400; }
+  /* low-confidence persona → warning accent (colour as navigation) */
+  .persona.low .dots i.on { background: var(--warn); }
+  .persona.low .vs-val { color: var(--warn); }
 
   .exec-grid { display: grid; grid-template-columns: 1.55fr 0.5fr; gap: 2rem; align-items: stretch; }
   .exec p { font-family: var(--sans); font-size: 1.02rem; line-height: 1.6; max-width: 52ch; margin: 0; }
@@ -212,6 +233,9 @@
   .itemlist.plus .sym { border-color: var(--accent); background: var(--accent-tint); }
   .itemlist.plus .sym::before { background: var(--accent); }
   .itemlist.plus .sym::after { content: ""; width: 1.4px; height: 7px; background: var(--accent); position: absolute; }
+  /* risks: burnt-orange ⊖ on a soft coral chip — the ONE place negatives get colour */
+  .itemlist.risk .sym { border-color: var(--warn-line); background: var(--warn-tint); }
+  .itemlist.risk .sym::before { background: var(--warn); }
   .diagram { display: grid; place-items: center; align-self: center; }
 
   .iq-grid { display: grid; grid-template-columns: 128px 1fr 128px 1fr; gap: 1.2rem; align-items: start; }
@@ -235,7 +259,7 @@
   .burst { display: grid; place-items: center; }
 
   /* Final Verdict — the climax: light type on the deep-emerald block */
-  .sec--verdict .gut .no { color: #7FE0C7; }
+  .sec--verdict .gut .no { color: rgba(127, 224, 199, 0.22); }
   .sec--verdict .gut .nm { color: rgba(255, 255, 255, 0.72); }
   .sec--verdict .verdict-h { color: #fff; }
   .sec--verdict .verdict-sub { color: rgba(255, 255, 255, 0.82); }
@@ -253,7 +277,8 @@
   .pstep { flex: 1; display: flex; flex-direction: column; gap: 0.45rem; padding-right: 0.4rem; }
   .picon { position: relative; z-index: 1; width: 36px; height: 36px; border-radius: 50%; background: var(--chip-bg); border: 1px solid var(--accent-line); display: grid; place-items: center; }
   .picon svg { width: 19px; height: 19px; stroke: var(--accent); }
-  .pstep .pname { font-family: var(--sans); font-weight: 700; font-size: 0.68rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink); }
+  .pstep .pname { font-family: var(--sans); font-weight: 700; font-size: 0.68rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink); display: flex; align-items: baseline; gap: 0.4rem; }
+  .pstep .pstage { font-family: var(--mono); font-weight: 400; font-size: 0.58rem; letter-spacing: 0.08em; color: var(--accent); font-variant-numeric: tabular-nums; }
   .pstep .pdesc { font-family: var(--sans); font-size: 0.68rem; line-height: 1.32; color: var(--ink-2); }
   .pstep .ptime { font-family: var(--mono); font-size: 0.6rem; color: var(--muted); letter-spacing: 0.04em; margin-top: auto; padding-top: 0.4rem; }
   .parrow { position: relative; z-index: 1; display: grid; place-items: start center; padding-top: 11px; color: var(--accent); }
@@ -441,8 +466,8 @@
         </svg>
         <div class="fig">Fig. 01 — Strength vectors</div>
       </div>
-      <div class="gut"><div class="no">04</div><div class="nm">Risks /<br>friction points</div></div>
-      <ul class="itemlist" id="risks-list"></ul>
+      <div class="gut gut--warn"><div class="no">04</div><div class="nm">Risks /<br>friction points</div></div>
+      <ul class="itemlist risk" id="risks-list"></ul>
     </div>
   </section>
 
@@ -675,7 +700,7 @@
 
     // ---- personas ----
     $("persona-row").innerHTML = REPORT.personas.map(function (p) {
-      return '<div class="persona"><div class="phead"><svg class="ic ic-sm" viewBox="0 0 24 24">' +
+      return '<div class="persona' + (p.strength < 5 ? " low" : "") + '"><div class="phead"><svg class="ic ic-sm" viewBox="0 0 24 24">' +
         (PERSONA_ICON[p.role] || PERSONA_ICON.person) + '</svg><span class="pname">' + esc(p.name) + '</span></div>' +
         '<div class="dots">' + dotsHTML(p.dots, 7) + '</div>' +
         '<p>' + esc(p.text) + '</p>' +
@@ -746,7 +771,8 @@
     var arrow = '<div class="parrow"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M2 8h11M9 4l4 4-4 4"/></svg></div>';
     $("pipe").innerHTML = PIPELINE.map(function (s, i) {
       var step = '<div class="pstep"><span class="picon"><svg class="ic" viewBox="0 0 24 24">' + ICONS[i] + '</svg></span>' +
-        '<div class="pname">' + esc(s[0]) + '</div><div class="pdesc">' + esc(s[1]) + '</div><div class="ptime">' + esc(s[2]) + '</div></div>';
+        '<div class="pname"><span class="pstage">' + String(i + 1).padStart(2, "0") + '</span>' + esc(s[0]) + '</div>' +
+        '<div class="pdesc">' + esc(s[1]) + '</div><div class="ptime">' + esc(s[2]) + '</div></div>';
       return step + (i < PIPELINE.length - 1 ? arrow : "");
     }).join("");
 
