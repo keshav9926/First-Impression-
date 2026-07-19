@@ -45,6 +45,7 @@ from app.config import settings
 from app.ingestion.chunker import chunk_text
 from app.ingestion.fetcher import crawl
 from app.ingestion.robots import is_allowed
+from app.ingestion import vision
 from app.ingestion.sanitize import sanitize_text
 from app.rag import embeddings, pipeline, qa, store
 from app.schemas import (
@@ -121,15 +122,30 @@ def _ingest_site(url: str, max_pages: int) -> IngestResponse:
         injection_lines_removed += len(removed)
         sanitized_pages.append((page, clean))
 
+    # Vision (Phase 9): caption product screenshots the text extractor is blind
+    # to, so the report can reason about WHAT a visual shows — not just that one
+    # exists. Fail-open + capped; {} when disabled/unconfigured.
+    events.emit("phase", name="vision")
+    captions_by_page = vision.caption_pages(result.pages)
+
     # Each chunk carries: url (citations), headings (read_page section map),
-    # ctas (signup/demo actions), extraction_warning (JS-thin caveat). Chroma
-    # metadata must be scalar, so lists are joined.
+    # ctas (signup/demo actions), images (visual evidence: alt/filename labels +
+    # any vision captions), extraction_warning (JS-thin caveat). Chroma metadata
+    # must be scalar, so lists are joined.
+    def _img_meta(page) -> str:
+        parts = list(page.images)
+        caps = captions_by_page.get(page.url, [])
+        if caps:
+            parts.append("VISION READS — " + " ; ".join(caps))
+        return " · ".join(parts)
+
     chunks = [
         {
             "text": piece,
             "url": page.url,
             "headings": " · ".join(page.headings),
             "ctas": " · ".join(page.ctas),
+            "images": _img_meta(page),
             "extraction_warning": result.thin_extraction,
         }
         for page, clean in sanitized_pages

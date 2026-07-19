@@ -133,7 +133,16 @@ def _read_page(url: str) -> str:
     # CTA is a real finding; a present one must not read as missing.
     ctas = page_chunks[0].get("ctas", "")
     cta_line = f"Primary actions available on this page: {ctas}\n\n" if ctas else ""
-    return f"Text of {url}:\n\n{cta_line}{body}"
+    # Visual evidence: the text extractor cannot read images, so without this
+    # line models "observe" that no screenshots/videos exist on pages full of
+    # them (caught live: vortexify.ai dashboard shots reported as missing).
+    images = page_chunks[0].get("images", "")
+    img_line = (
+        f"Visuals on this page (labels + vision-model descriptions where read): {images}\n\n"
+        if images
+        else "No substantive images detected on this page.\n\n"
+    )
+    return f"Text of {url}:\n\n{cta_line}{img_line}{body}"
 
 
 def _search_content(query: str) -> str:

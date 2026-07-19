@@ -95,6 +95,18 @@ class Settings(BaseSettings):
     nvidia_nemo_model: str = "nvidia/nemotron-3-ultra-550b-a55b"
     nvidia_mistral_model: str = "mistralai/mistral-medium-3.5-128b"
 
+    # --- Vision: read product screenshots the text extractor is blind to ---
+    # 2026-07-19 vision bake-off on real product dashboards (7 VLMs): omni-30b
+    # won on BOTH speed (2.3s/img) and accuracy (read exact shipment IDs,
+    # statuses, chart contents) — beating llama-3.2-90b-vision (NVIDIA 504s),
+    # gemma-3n, and the nemotron VL 8b/12b. Captions ride into chunk metadata so
+    # the agent/personas/judge SEE what a screenshot shows, killing false
+    # "no product screenshots" / "can't tell what the UI does" findings.
+    vision_enabled: bool = True
+    vision_model: str = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
+    vision_max_images_per_page: int = 4
+    vision_max_images_total: int = 12  # hard cost cap per ingest (~2s each)
+
     # Two report pipelines (2026-07-19 bake-off). "→" = failover: try the next
     # model if one errors OR produces no valid report.
     #   deep   (no time budget): glm-5.2 → v4-pro → v4-flash → nemotron

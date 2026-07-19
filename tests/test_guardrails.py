@@ -107,6 +107,42 @@ def test_judge_salvages_truncated_json(monkeypatch):
     assert claims == ["sells widgets"]  # index 1 dropped despite truncation
 
 
+def test_judge_drops_contradicted_persona_and_question(monkeypatch):
+    # Regression (2026-07-19, trynarrative.com): persona friction said "no SOC 2
+    # mentioned" and a question asked about SOC 2 while the page said "SOC 2
+    # Type II audit (in progress)". Uncited statements must be contradiction-
+    # checked and dropped, while non-contradicted ones survive.
+    from app.schemas import PersonaImpression
+
+    rep = _report()
+    rep.persona_panel = [
+        PersonaImpression(
+            persona="Technical Evaluator",
+            would_sign_up=True,
+            what_resonated=["clear docs"],
+            friction=["no SOC 2 mentioned", "no pricing shown"],
+            reason="docs are clear",
+        )
+    ]
+    rep.unanswered_questions = ["Does Acme have SOC 2?", "What does it cost?"]
+    monkeypatch.setattr(judge.store, "all_chunks", lambda: [
+        {"url": "https://a.com/", "text": "Acme sells widgets. SOC 2 Type II audit in progress."}
+    ])
+    # claims 0-1 supported; statements: 0=resonated, 1-2=friction, 3-4=questions
+    payload = (
+        '{"verdicts": [{"index": 0, "supported": true}, {"index": 1, "supported": true}],'
+        ' "statement_verdicts": [{"index": 0, "contradicted": false},'
+        ' {"index": 1, "contradicted": true}, {"index": 2, "contradicted": false},'
+        ' {"index": 3, "contradicted": true}, {"index": 4, "contradicted": false}]}'
+    )
+    monkeypatch.setattr(judge.llm_pool, "chat", lambda *a, **k: _fake_message(payload))
+
+    out = judge.verify_groundedness(rep)
+    assert out.persona_panel[0].friction == ["no pricing shown"]
+    assert out.persona_panel[0].what_resonated == ["clear docs"]
+    assert out.unanswered_questions == ["What does it cost?"]
+
+
 def test_judge_fails_open_on_error(monkeypatch):
     monkeypatch.setattr(judge.store, "all_chunks", lambda: [
         {"url": "https://a.com/", "text": "x"}

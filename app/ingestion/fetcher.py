@@ -21,7 +21,7 @@
 
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from urllib.parse import urldefrag, urljoin, urlparse
 
@@ -68,6 +68,15 @@ class Page:
     text: str
     headings: list[str]
     ctas: list[str]  # primary call-to-action button/link labels (Sign up, Try free, ...)
+    # Visual-content evidence: alt texts / filenames of meaningful <img>/<video>
+    # elements. The text extractor is BLIND to visuals, and models were filling
+    # that blind spot with confident false negatives ("no screenshot of the
+    # product anywhere") on pages full of dashboard screenshots (caught live
+    # 2026-07-19, vortexify.ai). `images` (labels) lets the agent and judge see
+    # that visuals EXIST; `image_urls` feeds the vision captioner so they can
+    # also see WHAT the visual shows (app/ingestion/vision.py).
+    images: list[str] = field(default_factory=list)
+    image_urls: list[str] = field(default_factory=list)
 
 
 # Detecting a JS-rendered site (SPA / Framer / Webflow) where the static HTML
@@ -259,6 +268,75 @@ def _extract_ctas(html: str) -> list[str]:
     return ctas
 
 
+# Visual-evidence extraction. Icons/logos/pixels are noise; product screenshots
+# and demo videos are SIGNAL (their absence is a legitimate finding, their
+# presence must not be "not found"). Heuristic: skip tiny images and
+# obvious chrome (logo/icon/favicon/avatar), keep the rest as alt-or-filename.
+_MAX_IMAGES = 15
+_MAX_IMAGE_CHARS = 90
+_IMG_NOISE_HINTS = ("logo", "icon", "favicon", "avatar", "sprite", "badge", "arrow", "pixel")
+
+
+class _ImgCollector(HTMLParser):
+    """Collect evidence that meaningful visuals exist: <img> alt/src (minus
+    obvious chrome) and any <video>/<source> presence."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.images: list[str] = []          # display labels (alt/filename)
+        self.image_srcs: list[str] = []       # raw src of the SAME images, aligned
+        self.has_video = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        a = dict(attrs)
+        if tag == "video" or (tag == "source" and (a.get("type") or "").startswith("video")):
+            self.has_video = True
+            return
+        if tag != "img":
+            return
+        src = (a.get("src") or a.get("data-src") or "").strip()
+        alt = (a.get("alt") or "").strip()
+        name = src.rsplit("/", 1)[-1].split("?")[0]
+        blob = f"{alt} {name}".lower()
+        if not (alt or name) or any(h in blob for h in _IMG_NOISE_HINTS):
+            return
+        # tiny declared size → decorative
+        try:
+            if int(a.get("width") or 999) < 64 or int(a.get("height") or 999) < 64:
+                return
+        except ValueError:
+            pass
+        self.images.append((alt or name)[:_MAX_IMAGE_CHARS])
+        self.image_srcs.append(src)
+
+
+def _extract_images(html: str, base_url: str = "") -> tuple[list[str], list[str]]:
+    """(labels, urls) for substantive images (+ a video marker in labels),
+    deduped by label, document order. `labels` ride on Page.images → chunk
+    metadata; `urls` (absolute) ride on Page.image_urls → vision captioning.
+    Together they close the text-only blind spot around visuals."""
+    collector = _ImgCollector()
+    try:
+        collector.feed(html)
+    except Exception:
+        return [], []
+    seen: set[str] = set()
+    labels, urls = [], []
+    for label, src in zip(collector.images, collector.image_srcs):
+        if label.lower() in seen:
+            continue
+        seen.add(label.lower())
+        labels.append(label)
+        abs_url = urljoin(base_url, src) if base_url else src
+        if abs_url.startswith(("http://", "https://")):
+            urls.append(abs_url)
+        if len(labels) >= _MAX_IMAGES:
+            break
+    if collector.has_video:
+        labels.insert(0, "[video element present]")
+    return labels, urls
+
+
 def _extract_headings(html: str) -> list[str]:
     """The page's section headings (h1-h3), deduped, in document order.
 
@@ -363,12 +441,15 @@ def _crawl_loop(start_url: str, max_pages: int, fetch) -> CrawlResult:
             seed_text_chars = len(text)
             seed_html_chars = len(html)
         if text.strip():
+            labels, image_urls = _extract_images(html, base_url=url)
             pages.append(
                 Page(
                     url=url,
                     text=text,
                     headings=_extract_headings(html),
                     ctas=_extract_ctas(html),
+                    images=labels,
+                    image_urls=image_urls,
                 )
             )
             events.emit("crawl.page", url=url, chars=len(text))

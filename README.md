@@ -1,269 +1,200 @@
-# First Impression
+# FIE — First Impression Engine
 
-> **AI system that analyzes a startup's public product experience and produces a grounded, citation-backed report on the new-user journey.**
+> **Nature doesn't guess. A first impression is always there — FIE makes it visible.**
 
-Given a company's public site or docs URL, First Impression crawls public content, builds a hybrid semantic + keyword index, and runs a ReAct analysis agent that produces a structured report — every claim tied to a source page.
+FIE is a complete, end-to-end **agentic AI system** that reads a startup's public website the way a first-time visitor would, then produces a grounded, citation-backed report on what lands, what confuses, and what's missing. Every claim cites the exact public page it came from; if the evidence is too thin to be fair, FIE refuses rather than invents.
 
-Full spec: [project.md](project.md)
+One autonomous pipeline — plan → crawl → sanitize → index → retrieve → multi-persona reasoning → schema-constrained synthesis → self-verification — with no human in the loop.
 
----
-
-## Features
-
-- **Respectful crawling** — robots.txt enforced at the API boundary; rate-limited, no login scraping
-- **Hybrid retrieval** — dense vector search (Voyage AI) + BM25 keyword search fused via Reciprocal Rank Fusion (RRF), reranked by a cross-encoder
-- **Relevance gate** — refuses to answer if no retrieved chunk clears a calibrated relevance threshold (fail-closed, not fail-open)
-- **ReAct analysis agent** — explores the ingested knowledge base with tools (`list_pages`, `read_page`, `search_content`) before synthesizing a report
-- **Persona panel** — three distinct visitors (technical evaluator / business buyer / first-time user) judge the same evidence in parallel (LangGraph fan-out), so the report shows *who* bounces *where*
-- **Structured, grounded output** — `FirstImpressionReport` Pydantic schema enforces citations structurally (not just via prompt); every `Observation` requires a `source_url`
-- **Refuses on empty evidence** — a report is never fabricated from an empty/near-empty store (robots-blocked or dead crawl → HTTP 409, not a hallucinated report)
-- **JS-site rendering** — static crawl escalates to a headless Playwright render when extraction is thin, so Framer/Webflow/SPA sites are readable
-- **Guardrails** — prompt-injection sanitizer pre-chunking + a groundedness judge that drops claims the cited page doesn't support
-- **Dual pipeline modes** — `normal` (fast default: DeepSeek-V4-Pro → V4-Flash → Nemotron) and `deep` (accuracy-first: GLM-5.2 → V4-Pro → V4-Flash → Nemotron); selectable per-request via `PIPELINE_MODE` env or the `use_mode()` context manager; automatic failover + circuit breaker + usage accounting
-- **MCP server** — the analyzer is exposed over the Model Context Protocol (stdio), so any MCP client (Claude Desktop, Claude Code, an IDE) can call `analyze_first_impression` / `ask_ingested` as native tools — the same pipeline the HTTP API serves, no drift
-- **Observability** — optional Langfuse tracing: each report is one span tree with every LLM call nested as a generation (model, token usage, latency). A hard no-op without keys, so nothing is paid for until you opt in
-- **Eval harness** — retrieval precision/recall evals over a curated dataset with configurable relevance-threshold tuning
+**Made by Keshav Kakani** · kkakani160@gmail.com · [github.com/keshav9926](https://github.com/keshav9926) · +91 90240 99116
 
 ---
 
-## API Endpoints
+## Why it's trustworthy
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/health` | Liveness check — returns app name and environment |
-| `POST` | `/ingest` | Crawl a public URL, chunk, embed, and store content |
-| `POST` | `/ask` | Answer a question from ingested content with citations |
-| `POST` | `/report` | Run the ReAct agent and produce a full First Impression report |
+FIE is designed around one rule: **never say anything about a company that its public pages don't support.**
 
-Interactive docs at **http://127.0.0.1:8000/docs** once the server is running.
+| Guard | What it does |
+|---|---|
+| **robots.txt gate** | Checked *before* any request. Disallowed → no fetch, ever. Public pages only — no login areas, no scraping behind auth |
+| **Prompt-injection sanitizer** | Page text is scrubbed of instruction-like content before it ever reaches an LLM |
+| **Structural citations** | The `FirstImpressionReport` schema *requires* a `source_url` on every observation — uncited claims cannot exist |
+| **Citation verification** | Any claim citing a page that was never ingested is dropped in code, not by prompt |
+| **Groundedness judge** | A second adversarial LLM pass reads each claim next to its cited page's actual text and drops unsupported ones |
+| **Contradiction check** | Uncited statements (persona impressions, open questions) are checked against *all* page text — "X is not mentioned" is dropped when the site does mention X (caught live: a site's "SOC 2 audit in progress" vs a claimed "no SOC 2 mentioned") |
+| **Visual-evidence metadata** | The text extractor can't see images — so image alt-text/filenames and video markers are captured as metadata, preventing false "no product screenshots" claims about pages full of dashboard shots |
+| **Empty-evidence refusal** | A robots-blocked or dead crawl produces HTTP 409, never a fabricated report |
+| **Relevance gate** | Retrieval refuses to answer when nothing clears a calibrated relevance floor (fail-closed) |
+| **Judge determinism** | The fact-check pass runs at temperature 0 — same evidence, same verdicts |
 
 ---
 
 ## Architecture
 
 ```
-POST /ingest
-  └── robots.is_allowed()          # hard rule #1: public data only
-      └── fetcher.crawl()          # trafilatura-powered HTML extraction
-          └── chunker.chunk_text() # hand-written semantic chunker
-              └── embeddings.embed_documents()  # Voyage AI
-                  └── store.replace_all()       # ChromaDB
-
-POST /ask
-  └── pipeline.retrieve()          # embed → vector + BM25 → RRF → rerank
-      └── relevance gate           # score < min_relevance → honest refusal
-          └── qa.answer()          # LLM (Gemini / Anthropic) answers from chunks only
-
-POST /report                       # ?panel=true → persona panel
-  └── report.generate_report()     # refuses (409) if the store is empty/thin
-      └── explore ONCE (tools)      # llm_pool: chain selected by pipeline_mode
-          └── panel (LangGraph)     # 3 personas judge the same evidence in parallel
-              └── synthesize        # per-provider quality failover → FirstImpressionReport
-                  └── apply_guards  # citation verify + groundedness judge + thin-crawl caveat
-
-POST /analyze/stream               # SSE: full ingest → report as live agent-step events
+URL ──► robots.txt gate ──► Crawl (httpx, BFS, same-domain)
+                              │  thin extraction? ──► headless render (Playwright)
+                              ▼
+                     Sanitize (injection scrub)
+                              ▼
+                     Chunk (~1600 chars, overlap; heading/CTA/image metadata)
+                              ▼
+                     Embed (NVIDIA nemotron-3-embed-1b) ──► Chroma (local, persistent)
+                              ▼
+        ┌─────────────── Hybrid retrieval ───────────────┐
+        │  dense vectors + BM25 ──► RRF fusion ──► rerank │
+        │  (Voyage cross-encoder) ──► relevance gate      │
+        └─────────────────────────────────────────────────┘
+                              ▼
+                     ReAct explore agent
+                     (list_pages / read_page / search_content)
+                              ▼
+                     Persona panel (LangGraph fan-out)
+                     technical evaluator · business buyer · first-time user
+                              ▼
+                     Synthesis (schema-constrained JSON, per-model failover)
+                              ▼
+                     Guards: citations ─► groundedness judge ─► contradiction check
+                              ▼
+                     FirstImpressionReport ──► web page / MCP / API / outreach
 ```
 
----
+### Two failover pipelines
 
-## Tech Stack
+`→` means *"if this model fails or produces no valid report, run the next one."* Every LLM call in a run (explore, personas, synthesis, judge) inherits the selected chain.
 
-| Layer | Technology |
-|-------|-----------|
-| Web framework | FastAPI + Uvicorn |
-| Embeddings | Voyage AI (`voyage-3.5`) |
-| Vector store | ChromaDB |
-| Keyword search | BM25 (`rank-bm25`) |
-| Reranking | Voyage AI reranker |
-| LLM — Agent `normal` mode | NVIDIA NIM: DeepSeek-V4-Pro → V4-Flash → Nemotron-3-Ultra |
-| LLM — Agent `deep` mode | NVIDIA NIM: GLM-5.2 → V4-Pro → V4-Flash → Nemotron-3-Ultra |
-| LLM — deep fallback | Gemini (`gemini-3.1-flash-lite` / `gemini-3-flash-preview`), Groq |
-| LLM — Q&A (`/ask`) | Groq (default) / Gemini / Claude |
-| JS rendering | Playwright (headless Chromium), lazy fallback |
-| HTML extraction | `trafilatura` |
-| Config | `pydantic-settings` + `.env` |
-| Agent tool interface | MCP server (`mcp`, stdio) |
-| Observability | Langfuse traces (optional) |
-| Containerization | Docker + Docker Compose |
+| Mode | Chain | Character |
+|---|---|---|
+| **normal** (default) | DeepSeek-V4-Pro → V4-Flash → Nemotron-3-Ultra | Fast, reliable |
+| **deep** | **GLM-5.2** → V4-Pro → V4-Flash → Nemotron-3-Ultra | Accuracy-first, no time budget |
+
+All models run on the NVIDIA API (one key). Failover includes quality-failover: a synthesis whose JSON doesn't validate against the report schema falls through to the next model. Circuit breaker + daily-vs-minute 429 handling per provider.
+
+### Model roles
+
+| Role | Model |
+|---|---|
+| Explore / personas / synthesis / judge | Chain above (mode-selected) |
+| Embeddings | `nvidia/nemotron-3-embed-1b` (2048-dim) |
+| Rerank | Voyage `rerank-2` cross-encoder (calibrated gate) |
+| Observability | Langfuse (optional; hard no-op without keys) |
 
 ---
 
 ## Quickstart
 
-### Prerequisites
-
-- Python 3.12+
-- [`uv`](https://docs.astral.sh/uv/) package manager
-- API keys — see [Configuration](#configuration) below
-
-```sh
-# 1. Clone and install
-git clone https://github.com/keshav9926/First-Impression-.git
-cd First-Impression-
-
-# 2. Install dependencies
+```bash
+# 1. deps (Python ≥3.12)
 uv sync
 
-# 3. Configure environment
-copy .env.example .env
-# → open .env and fill in at minimum: VOYAGE_API_KEY + NVIDIA_API_KEY
+# 2. keys — .env
+NVIDIA_API_KEY=nvapi-...     # the whole LLM chain + embeddings
+VOYAGE_API_KEY=pa-...        # reranker
+# optional: LANGFUSE_SECRET_KEY / LANGFUSE_PUBLIC_KEY / LANGFUSE_BASE_URL
 
-# 4. Start the dev server
+# 3. run
 uv run uvicorn app.main:app --reload
+# live dashboard at http://127.0.0.1:8000  ·  API docs at /docs
 ```
 
-Then open:
-- **http://127.0.0.1:8000/docs** — interactive Swagger UI
-- **http://127.0.0.1:8000/health** — liveness check
+Docker:
 
-### Typical workflow
-
-```sh
-# 1. Ingest a public site (crawls up to 15 pages by default)
-curl -X POST http://127.0.0.1:8000/ingest \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://docs.example.com", "max_pages": 15}'
-
-# 2. Ask a question with citations
-curl -X POST http://127.0.0.1:8000/ask \
-  -H "Content-Type: application/json" \
-  -d '{"question": "What does this product do?"}'
-
-# 3. Generate a full First Impression report
-curl -X POST http://127.0.0.1:8000/report
-```
-
----
-
-## Configuration
-
-Copy `.env.example` to `.env` and set the values:
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `VOYAGE_API_KEY` | ✅ | — | Voyage AI embeddings — free tier at [dashboard.voyageai.com](https://dashboard.voyageai.com) |
-| `NVIDIA_API_KEY` | ✅ | — | NVIDIA NIM — drives both pipeline chains; free endpoints at [build.nvidia.com](https://build.nvidia.com) |
-| `GEMINI_API_KEY` | Recommended | — | Deep fallback + native synthesis — [aistudio.google.com](https://aistudio.google.com) |
-| `GEMINI_SECONDACC_API_KEY` | Optional | — | 2nd Google account → 2× Gemini fallback headroom |
-| `GROQ_API_KEY` | Optional | — | Deep fallback — [console.groq.com](https://console.groq.com) |
-| `ANTHROPIC_API_KEY` | When `LLM_PROVIDER=anthropic` | — | Anthropic key (for `/ask` only) |
-| `PIPELINE_MODE` | — | `normal` | `normal` (fast: V4-Pro → V4-Flash → Nemotron) or `deep` (accuracy-first: GLM → V4-Pro → V4-Flash → Nemotron) |
-| `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | Optional | — | Both set → report runs are traced to Langfuse ([cloud.langfuse.com](https://cloud.langfuse.com)); absent → tracing is a no-op |
-| `LANGFUSE_HOST` | — | `https://cloud.langfuse.com` | Set to `https://us.cloud.langfuse.com` for the US region |
-| `EMBEDDING_MODEL` | — | `voyage-3.5` | Voyage embedding model |
-| `MIN_RELEVANCE` | — | `0.45` | Reranker score threshold below which answers are refused |
-
-> **Pipeline modes:** All NVIDIA models share one `integrate.api.nvidia.com` key and account quota. `normal` mode skips GLM-5.2 for speed (V4-Pro leads); `deep` mode leads with GLM-5.2 as the accuracy anchor. Gemini/Groq (separate keys) are the real rate-limit insurance across both chains.
-
----
-
-## Run Tests
-
-```sh
-uv run pytest
-```
-
----
-
-## Run in Docker
-
-```sh
+```bash
 docker compose up --build
 ```
 
-The compose file mounts `.env` automatically — no extra config needed. The image installs headless Chromium so JS-rendered sites work in-container, and the ChromaDB vector store lives on a named volume (`chroma_data`) so ingested content survives restarts. A `/health` healthcheck gates the container.
+## API
 
----
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/health` | Liveness |
+| `POST` | `/ingest` | Crawl a public URL → chunk → embed → store |
+| `POST` | `/ask` | Grounded Q&A over the ingested site, with citations |
+| `POST` | `/report?panel=true&deep=false` | Full report; `deep=true` selects the GLM-5.2 chain |
+| `GET` | `/analyze/stream?url=...&deep=false` | One-call crawl+report with live SSE progress events |
 
-## Observability (optional)
+## MCP server
 
-Set `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY` + `LANGFUSE_BASE_URL` (free project at [cloud.langfuse.com](https://cloud.langfuse.com)) and every report run is traced following Langfuse's [instrumentation best practices](https://github.com/langfuse/skills):
+The same pipeline, exposed over the Model Context Protocol (stdio) for Claude Desktop / Claude Code / IDEs:
 
-- **LLM calls** are captured by the **Langfuse OpenAI drop-in** — model, token usage, cost, and latency are recorded automatically (no manual logging) for the whole NVIDIA/Gemini chain.
-- **Correct observation types**: the explore loop and each persona are `agent` observations (so they show as distinct nodes in Langfuse's Agent Graph), retrieval is a `retriever`, and the root span's input/output is the ingested pages → the finished report.
-
-So "which model actually answered", "how many tokens", "where did the 3 minutes go", and "which persona bounced" are answerable at a glance. Without the keys, tracing is a hard no-op ([app/observability.py](app/observability.py)) — no account or config required to run the app.
-
----
-
-## Run as an MCP Server
-
-The analyzer is also a [Model Context Protocol](https://modelcontextprotocol.io) server, so an MCP client (Claude Desktop, Claude Code, an IDE) can call it as a tool instead of over HTTP.
-
-```sh
-# Serve the tools over stdio (the transport local MCP clients speak)
+```bash
 uv run python -m app.mcp_server
 ```
 
-Register it in your MCP client's config (paths are examples):
+Tools: `analyze_first_impression(url, max_pages, panel, deep)` · `ask_ingested(question)` · `ingestion_status()`.
 
-```json
-{
-  "mcpServers": {
-    "first-impression": {
-      "command": "uv",
-      "args": ["run", "python", "-m", "app.mcp_server"],
-      "cwd": "/absolute/path/to/First-Impression-"
-    }
-  }
-}
+---
+
+## The deliverable: one page per company
+
+Each analyzed company gets a single, static, shareable report page (engineering-datasheet design — monochrome, mono-forward, print-like):
+
+```
+pipeline (deep run)  ──►  reports/<company>.json      # verified report + run meta
+web/report.html      ──►  the design template          # reads everything from `var REPORT`
+web/render_report.py ──►  web/dist/<company>.html      # real data injected into the template
+private hosting (unguessable link / static PDF)  ──►  delivered to that founder only
 ```
 
-**Tools exposed**
+> Report pages contain third-party company analysis and are **never committed or made public**
+> (`reports/`, `web/dist/`, and `outreach.xlsx` are git-ignored). They're hosted privately per
+> recipient — an unguessable link (Cloudflare/S3 with `noindex`) or exported to a static PDF.
 
-| Tool | What it does |
-|------|--------------|
-| `analyze_first_impression(url, max_pages=15, panel=True)` | Crawl → ReAct report → structured `FirstImpressionReport` (every claim cited) |
-| `ask_ingested(question, top_k=5)` | Grounded Q&A over the most recently analyzed site |
-| `ingestion_status()` | Whether a site is currently ingested (chunk count + source pages) |
-
-Each tool delegates to the same pipeline functions the HTTP endpoints call, and returns a structured `{status, ...}` result — a robots-blocked or thin crawl refuses rather than fabricating a report, exactly as `/report` does.
-
----
-
-## Run Retrieval Evals
-
-```sh
-# Score the retrieval pipeline against the eval dataset
-uv run python evals/run_retrieval_eval.py
-
-# Debug individual retrieval queries
-uv run python evals/debug_retrieval.py
+```bash
+python web/render_report.py            # render every reports/*.json
+python web/render_report.py vortexify  # just one
 ```
 
----
+Scores on the page are **derived from real signals** (persona verdicts, strength/friction balance, crawl coverage) — never invented. Founders receive a link, not a file; viewing costs zero backend.
 
-## Design Decisions (Build vs. Buy)
-
-- **Chunking is hand-written** ([app/ingestion/chunker.py](app/ingestion/chunker.py)) as a deliberate learning artifact — ~60 testable lines whose strategy we fully own. LangChain's splitters (`RecursiveCharacterTextSplitter`, `MarkdownHeaderTextSplitter`) are a drop-in alternative and the reasonable "buy" choice in a production rush; speed is identical and quality is comparable on clean docs text.
-
-- **HTML extraction is bought** (`trafilatura`) — the inverse call: stripping boilerplate from arbitrary HTML is genuinely hard, so a battle-tested library wins.
-
-- **Retrieval is hybrid** — pure vector search misses exact-match queries (product names, error codes); pure BM25 misses semantic paraphrases. RRF fusion + cross-encoder reranking gives the best of both without a training dataset.
-
-- **Fail-closed relevance gate** — if the reranker scores all retrieved chunks below `min_relevance`, the system refuses to answer rather than hallucinate. Wrong-but-confident is the worst outcome when output is shown to third parties.
-
-- **Structured output as a grounding mechanism** — the `FirstImpressionReport` Pydantic schema is passed directly as a Gemini `response_schema`. An `Observation` without a `source_url` is structurally impossible to produce — hard rule #2 (grounded output only) is enforced by the schema, not just the prompt.
+`evals/build_outreach_xlsx.py` builds `outreach.xlsx` — company, founder, contact, and a paste-ready, credit-first email draft distilled from each verified report.
 
 ---
 
-## Build Phases
+## Design decisions
 
-| Phase | Status | Description |
-|-------|--------|-------------|
-| 0 | ✅ | Repo skeleton, FastAPI, Docker, env config |
-| 1 | ✅ | Public content ingestion, chunking, embeddings, ChromaDB, plain RAG Q&A |
-| 2 | ✅ | Hybrid search (BM25 + vectors + RRF), reranking, relevance gate, retrieval evals |
-| 3 | ✅ | ReAct analysis agent → structured `FirstImpressionReport` with citations |
-| 4 | ✅ | Persona panel (technical / business / first-time) via LangGraph fan-out |
-| 5 | ✅ | Guardrails: groundedness judge (LLM-as-judge) + prompt-injection sanitizer |
-| 6 | ✅ | Playwright JS rendering, streaming `/analyze/stream` dashboard, multi-provider pool (circuit breaker + usage accounting), evidence-floor guard |
-| 7 | ✅ | Custom MCP server (`app/mcp_server.py`) exposing the analyzer as stdio tools |
-| 8 | ✅ | Observability (optional Langfuse traces), finalized Docker deployment (Chromium in-image + persisted vector store) |
-| 9 | ✅ | Dual pipeline modes (`normal`/`deep`), DeepSeek-V4-Flash added to chain, synthesis robustness (JSON extraction, `response_format` fallback, `max_tokens` guard) |
+- **Explore-then-synthesize.** Free-form ReAct exploration first (the agent decides what to read/search), then a separate schema-constrained synthesis pass. Creativity where it helps, structure where it matters.
+- **One store, one company.** Chroma holds the company being analyzed; each ingest starts clean. Reports are frozen to JSON + static HTML at generation time, so nothing depends on the store afterward.
+- **Custom chunker over LangChain.** Chunking is ~60 lines: paragraph-aware packing to ~1600 chars with tail overlap. LangChain's `RecursiveCharacterTextSplitter` is the standard alternative and would slot in directly — the custom version was chosen to keep the ingestion path dependency-light and fully inspectable, not because the alternative wouldn't work.
+- **Judge can only drop, never add.** The verification layer removes unsupported or contradicted content; it cannot introduce new claims. Failure mode is a shorter report, not a wronger one.
+- **Fail-open judge, surfaced.** If the judge model is unavailable the report still ships — but with an explicit scope-note caveat that the automated fact-check didn't run.
+- **Kind but honest.** Reports credit what works first, never manufacture positivity, and phrase friction observationally ("a first-time visitor may hesitate here") — they're sent to the founders themselves.
 
----
+## Evals
 
-## License
+`evals/` contains the harnesses that drove the model and threshold choices:
 
-MIT
+- `model_bakeoff*.py` — 10-model bake-off (3 companies each, LLM-referee scoring, 10-minute gate) that produced the two chains above
+- `embed_rerank_bakeoff.py` — embedding/rerank provider comparison (kept Voyage rerank for its calibrated score scale; moved embeddings to NVIDIA for speed)
+- `run_retrieval_eval.py` — hit@5 / MRR over a labeled retrieval set
+- `run_deep_reports.py` / `rejudge_reports.py` — production runs on real companies + guard-pass re-application
+- `build_outreach_xlsx.py` — the outreach workbook
+
+## Tests
+
+```bash
+uv run python -m pytest tests/ -q     # 83 tests, no network
+```
+
+Covers: crawling/robots, sanitizer, chunking, retrieval fusion + gate, agent failover chains, panel merging, judge (support + contradiction + truncation salvage + fail-open), API endpoints, SSE streaming, MCP wrappers.
+
+## Project structure
+
+```
+app/
+  main.py            FastAPI app: ingest / ask / report / SSE stream
+  mcp_server.py      MCP front door (stdio) — same pipeline, no drift
+  config.py          All knobs (models, chains, thresholds) — env-overridable
+  schemas.py         FirstImpressionReport & friends (citations required by type)
+  observability.py   Langfuse tracing (no-op without keys)
+  ingestion/         fetcher (crawl+render+metadata) · sanitize · chunker · robots
+  rag/               store (Chroma) · embeddings · keyword (BM25) · pipeline (RRF+rerank+gate) · qa
+  agent/             llm_pool (chains/failover) · groq_driver (ReAct+synthesis) ·
+                     panel (LangGraph personas) · judge · grounding · tools · report
+web/
+  report.html        The shareable report page template (single REPORT object)
+  render_report.py   report JSON → static per-company page
+evals/               bake-offs, retrieval evals, production runs, outreach builder
+reports/             verified report JSONs per company
+tests/               83 offline tests
+```

@@ -58,6 +58,24 @@ page text states or clearly implies it — plausible-sounding is NOT enough.
 Claims about something MISSING/unclear are supported when the page text indeed
 does not show it. Return a verdict for EVERY claim, in order."""
 
+# Persona impressions and unanswered questions carry no citations, so
+# "supported" is the wrong test — instead ask whether ANY page text
+# CONTRADICTS them. Caught live (2026-07-19, trynarrative.com): personas said
+# "no SOC 2 mentioned" and a question asked about SOC 2 while the homepage
+# said "SOC 2 Type II audit (in progress)" — a false negative the founder
+# would spot instantly. Contradicted statements are DROPPED.
+_STMT_INSTRUCTION = """\
+Additionally, for every numbered STATEMENT below (uncited persona impressions
+and open questions), decide whether the source page text CONTRADICTS it. A
+statement that something is missing/absent/"not mentioned"/unanswered is
+contradicted when the page text shows it present IN ANY FORM — a partial or
+in-progress mention counts (e.g. "no SOC 2 mentioned" IS contradicted by
+"SOC 2 audit in progress"; "no free trial" IS contradicted by "start your
+free trial"; "no screenshots" IS contradicted by an [images/videos ...]
+metadata line listing product images). Statements about genuine absences stay
+uncontradicted. When truly uncertain, it is NOT contradicted. Return a verdict
+for EVERY statement, in order."""
+
 
 class ClaimVerdict(pydantic.BaseModel):
     index: int  # the claim's number in the prompt
@@ -65,8 +83,15 @@ class ClaimVerdict(pydantic.BaseModel):
     reason: str = ""  # optional — we never read it; kept so old payloads validate
 
 
+class StatementVerdict(pydantic.BaseModel):
+    index: int  # the statement's number in the prompt
+    contradicted: bool
+    reason: str = ""
+
+
 class _Verdicts(pydantic.BaseModel):
     verdicts: list[ClaimVerdict]
+    statement_verdicts: list[StatementVerdict] = []
 
 
 # Salvage complete "index"+"supported" pairs from a response body — used when
@@ -74,26 +99,36 @@ class _Verdicts(pydantic.BaseModel):
 # mid-object). We only ever need index + supported, so counting the COMPLETE
 # pairs recovers every finished verdict and safely ignores the cut-off tail.
 _VERDICT_RE = re.compile(r'"index"\s*:\s*(\d+)\s*,\s*"supported"\s*:\s*(true|false)')
+_STMT_RE = re.compile(r'"index"\s*:\s*(\d+)\s*,\s*"contradicted"\s*:\s*(true|false)')
 
 
-def _parse_verdicts(content: str) -> list[ClaimVerdict]:
-    """Parse the judge reply into verdicts, tolerating a truncated array.
+def _parse_verdicts(content: str) -> tuple[list[ClaimVerdict], list[StatementVerdict]]:
+    """Parse the judge reply into (claim, statement) verdicts, tolerating a
+    truncated array.
 
     Strict json.loads first (the happy path); if that fails — almost always an
     output-token cut mid-string — fall back to regex-salvaging every COMPLETE
-    index/supported pair. A partial judge result still drops the claims it did
-    manage to reject, instead of the whole pass failing open."""
+    pair. A partial judge result still drops the claims it did manage to
+    reject, instead of the whole pass failing open."""
     try:
-        return _Verdicts.model_validate(json.loads(content or "")).verdicts
+        parsed = _Verdicts.model_validate(json.loads(content or ""))
+        return parsed.verdicts, parsed.statement_verdicts
     except (json.JSONDecodeError, pydantic.ValidationError):
-        salvaged = [
+        claims = [
             ClaimVerdict(index=int(i), supported=(s == "true"))
             for i, s in _VERDICT_RE.findall(content or "")
         ]
-        if not salvaged:
+        stmts = [
+            StatementVerdict(index=int(i), contradicted=(s == "true"))
+            for i, s in _STMT_RE.findall(content or "")
+        ]
+        if not claims and not stmts:
             raise  # nothing usable — let the caller fail open
-        logger.warning("groundedness judge JSON truncated — salvaged %d verdict(s)", len(salvaged))
-        return salvaged
+        logger.warning(
+            "groundedness judge JSON truncated — salvaged %d claim / %d statement verdict(s)",
+            len(claims), len(stmts),
+        )
+        return claims, stmts
 
 
 def _claim_evidence(obs: object) -> tuple[str, str]:
@@ -121,6 +156,11 @@ def _page_texts(urls: set[str]) -> dict[str, str]:
                     header.append(f"[primary actions on this page: {c['ctas']}]")
                 if c.get("headings"):
                     header.append(f"[sections: {c['headings']}]")
+                # Same rationale as CTAs: visuals are stripped from body text,
+                # so the judge must see they exist or it upholds false
+                # "no screenshot/video" claims (vortexify.ai, 2026-07-19).
+                if c.get("images"):
+                    header.append(f"[images/videos on this page: {c['images']}]")
                 texts[c["url"]] = header
             texts[c["url"]].append(c["text"])
     return {u: "\n".join(parts)[:_PAGE_EXCERPT_CHARS] for u, parts in texts.items()}
@@ -142,14 +182,33 @@ def verify_groundedness(report: FirstImpressionReport) -> FirstImpressionReport:
     if not indexed:
         return report
 
-    pages = _page_texts({obs.source_url for _, obs in indexed})
+    # Uncited statements: persona impressions + unanswered questions. These are
+    # contradiction-checked against ALL stored pages (they cite nothing, so
+    # "which page supports this" does not apply — but "which page disproves
+    # this" does).
+    statements: list[tuple[str, int | None, int, str]] = []  # (kind, p_idx, item_idx, text)
+    for p_idx, persona in enumerate(report.persona_panel):
+        for item_idx, txt in enumerate(persona.what_resonated):
+            statements.append(("resonated", p_idx, item_idx, txt))
+        for item_idx, txt in enumerate(persona.friction):
+            statements.append(("friction", p_idx, item_idx, txt))
+    for q_idx, q in enumerate(report.unanswered_questions):
+        statements.append(("question", None, q_idx, q))
+
+    all_urls = {obs.source_url for _, obs in indexed}
+    all_urls.update(c["url"] for c in store.all_chunks())
+    pages = _page_texts(all_urls)
     claims_block = "\n".join(
         f"[{i}] claim: {c!r} | evidence quoted: {e!r} | cited page: {obs.source_url}"
         for i, (_, obs) in enumerate(indexed)
         for c, e in (_claim_evidence(obs),)
     )
+    stmts_block = "\n".join(f"[{i}] {txt!r}" for i, (_, _, _, txt) in enumerate(statements))
     pages_block = "\n\n".join(f"=== SOURCE PAGE {u} ===\n{t}" for u, t in pages.items())
-    prompt = f"{_JUDGE_INSTRUCTION}\n\nCLAIMS:\n{claims_block}\n\n{pages_block}"
+    prompt = (
+        f"{_JUDGE_INSTRUCTION}\n\nCLAIMS:\n{claims_block}\n\n"
+        f"{_STMT_INSTRUCTION}\n\nSTATEMENTS:\n{stmts_block}\n\n{pages_block}"
+    )
 
     try:
         # Pool with the finalized chain (prefer = settings.pool_prefer, GLM-led).
@@ -158,7 +217,9 @@ def verify_groundedness(report: FirstImpressionReport) -> FirstImpressionReport:
                 {
                     "role": "system",
                     "content": 'Reply ONLY with JSON: {"verdicts": [{"index": int, '
-                    '"supported": bool}, ...]} — one entry per claim, no other keys.',
+                    '"supported": bool}, ...], "statement_verdicts": [{"index": int, '
+                    '"contradicted": bool}, ...]} — one verdicts entry per claim, one '
+                    "statement_verdicts entry per statement, no other keys.",
                 },
                 {"role": "user", "content": prompt},
             ],
@@ -171,9 +232,12 @@ def verify_groundedness(report: FirstImpressionReport) -> FirstImpressionReport:
             # tokens from this same budget before the JSON — 4000 could truncate
             # verdicts on long claim lists, and truncated tails default to KEPT.
             max_tokens=8000,
+            # A fact-checker must be repeatable: at default temperature the
+            # same claims got different verdicts run-to-run (observed live).
+            temperature=0.0,
             label="groundedness-judge",
         )
-        verdicts = _parse_verdicts(message.content or "")
+        verdicts, stmt_verdicts = _parse_verdicts(message.content or "")
     except Exception as exc:  # fail-open: judge is a bonus layer, not a gate
         # But SURFACE it — a silent skip lets an unverified report look verified.
         # The reader must know the automated fact-check did not run this time.
@@ -202,4 +266,30 @@ def verify_groundedness(report: FirstImpressionReport) -> FirstImpressionReport:
                 if f == field and i not in unsupported
             ]
             setattr(report, field, kept)
+
+    # Drop contradicted persona impressions / questions (false negatives like
+    # "no SOC 2 mentioned" when the page says otherwise).
+    contradicted = {
+        v.index for v in stmt_verdicts if v.contradicted and 0 <= v.index < len(statements)
+    }
+    if contradicted:
+        logger.warning(
+            "groundedness judge dropped %d contradicted statement(s): %s",
+            len(contradicted),
+            [statements[i][3] for i in sorted(contradicted)],
+        )
+        drop = {(k, p, j) for i in contradicted for k, p, j, _ in (statements[i],)}
+        for p_idx, persona in enumerate(report.persona_panel):
+            persona.what_resonated = [
+                t for j, t in enumerate(persona.what_resonated)
+                if ("resonated", p_idx, j) not in drop
+            ]
+            persona.friction = [
+                t for j, t in enumerate(persona.friction)
+                if ("friction", p_idx, j) not in drop
+            ]
+        report.unanswered_questions = [
+            q for j, q in enumerate(report.unanswered_questions)
+            if ("question", None, j) not in drop
+        ]
     return report

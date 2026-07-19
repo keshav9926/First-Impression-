@@ -4,6 +4,13 @@
 # Local vector store data (rebuildable by re-running /ingest)
 chroma_data/
 
+# PRIVATE — analyzed companies, their report data, outreach, rendered pages.
+# These contain third-party company analysis + founder contacts. NEVER commit.
+reports/
+outreach.xlsx
+web/dist/
+evals/vision_out/
+
 # Python
 __pycache__/
 *.pyc
@@ -14,6 +21,8 @@ __pycache__/
 # OS / editor
 .DS_Store
 .vscode/
+# Office temp/lock files (e.g. ~$outreach.xlsx while open)
+~$*
 # code-review-graph tool artifacts — local dev aid, never commit
 .code-review-graph/
 .claude/

@@ -59,6 +59,7 @@ def replace_all(chunks: list[dict], embeddings: list[list[float]]) -> int:
                 "url": c["url"],
                 "headings": c.get("headings", ""),
                 "ctas": c.get("ctas", ""),
+                "images": c.get("images", ""),
                 "extraction_warning": c.get("extraction_warning", False),
             }
             for c in chunks
@@ -110,6 +111,7 @@ def all_chunks() -> list[dict]:
             "url": meta["url"],
             "headings": meta.get("headings", ""),
             "ctas": meta.get("ctas", ""),
+            "images": meta.get("images", ""),
             "extraction_warning": meta.get("extraction_warning", False),
         }
         for chunk_id, text, meta in zip(
