@@ -41,6 +41,7 @@ logger = logging.getLogger("first_impression")
 _MAX_RATE_RETRIES = 6
 _MAX_FORMAT_RETRIES = 3
 _MAX_SERVER_RETRIES = 3  # transient 5xx (provider hiccup) — retry, then fail over
+_MAX_NOTFOUND_RETRIES = 2  # intermittent 404 (NIM cold-scale) — retry, then fail over
 _MAX_EMPTY_RETRIES = 3  # blank 200 completion — retry, then fail over
 
 # Circuit breaker cooldowns. Once a provider gives up on a call (daily cap, or
@@ -257,6 +258,7 @@ def chat(
         format_tries = 0
         server_tries = 0
         empty_tries = 0
+        notfound_tries = 0
         # Pass name/metadata so the auto-captured generation is well-named
         # (no-op unless tracing is on).
         create_kwargs = dict(kwargs)
@@ -333,13 +335,19 @@ def chat(
                 _trip(provider, _TRANSIENT_COOLDOWN)
                 break  # network/DNS blip on this provider → try the next
             except openai.NotFoundError as exc:
-                # 404 = this model is momentarily unavailable (NIM cold-scale) or
-                # its id was retired. Treat like a dead provider: trip and fail
-                # over. A single transient 404 must NOT kill the whole report —
-                # caught live (2026-07-19, unitedtechlab normal run): one 404 mid-
-                # explore aborted the run instead of falling through to nemotron.
+                # 404 here is INTERMITTENT, not fatal: NVIDIA cold-scales a model
+                # and briefly 404s it (measured live on deepseek-v4-pro: 2 of 3
+                # tool-calls OK, 1 a 404). Since the first provider is the
+                # strongest, retry it a couple of times with backoff — it usually
+                # recovers — and only THEN trip + fail over. Mirrors the 5xx path.
+                # (A single uncaught 404 previously killed the whole report —
+                # 2026-07-19, unitedtechlab normal run.)
                 _tally(provider, model_name, "not_found_404")
                 last_exc = exc
-                _trip(provider, _TRANSIENT_COOLDOWN)
-                break  # model unavailable on this provider → try the next
+                notfound_tries += 1
+                if notfound_tries >= _MAX_NOTFOUND_RETRIES:
+                    logger.warning("%s 404 persisted — failing over", provider)
+                    _trip(provider, _TRANSIENT_COOLDOWN)
+                    break
+                time.sleep(min(2**notfound_tries, 8))
     raise last_exc

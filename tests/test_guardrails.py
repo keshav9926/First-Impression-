@@ -300,23 +300,27 @@ def test_pool_retries_transient_5xx_then_succeeds(monkeypatch):
     assert msg.content == "recovered" and calls["n"] == 2  # 1 failure + 1 retry
 
 
-def test_pool_fails_over_on_404(monkeypatch):
-    # A transient 404 (NIM cold-scale) on the first provider must fail over to
-    # the next, not kill the call. Regression: unitedtechlab normal run died on
-    # a single 404 mid-explore because NotFoundError was uncaught.
+def _resp404():
     import httpx
+    return httpx.Response(404, request=httpx.Request("POST", "http://nvidia.test"))
+
+
+class _Msg:
+    content = "ok"
+    tool_calls = None
+
+
+class _Resp:
+    choices = [type("C", (), {"message": _Msg()})()]
+
+
+def test_pool_retries_404_then_recovers_same_provider(monkeypatch):
+    # An INTERMITTENT 404 (NIM cold-scale) on the strongest provider must be
+    # retried on that same provider — not immediately demoted. It usually
+    # recovers (measured live: v4-pro 2/3 OK), so the best model keeps the job.
     import openai
 
     from app.agent import llm_pool
-
-    resp404 = httpx.Response(404, request=httpx.Request("POST", "http://nvidia.test"))
-
-    class FakeMsg:
-        content = "recovered on next provider"
-        tool_calls = None
-
-    class FakeResp:
-        choices = [type("C", (), {"message": FakeMsg()})()]
 
     seen = []
 
@@ -327,18 +331,49 @@ def test_pool_fails_over_on_404(monkeypatch):
                     @staticmethod
                     def create(**k):
                         seen.append(provider)
-                        if provider == "dsflash":
-                            raise openai.NotFoundError("not found", response=resp404, body=None)
-                        return FakeResp()
+                        if provider == "dspro" and seen.count("dspro") == 1:
+                            raise openai.NotFoundError("not found", response=_resp404(), body=None)
+                        return _Resp()
         return C()
 
     monkeypatch.setattr(llm_pool.settings, "nvidia_api_key", "k1")
     monkeypatch.setattr(llm_pool, "_client", fake_client)
     monkeypatch.setattr(llm_pool.time, "sleep", lambda s: None)
 
-    msg = llm_pool.chat([{"role": "user", "content": "hi"}], chain=["dsflash", "nemo"])
-    assert msg.content == "recovered on next provider"
-    assert seen == ["dsflash", "nemo"]  # 404'd first, failed over to second
+    msg = llm_pool.chat([{"role": "user", "content": "hi"}], chain=["dspro", "nemo"])
+    assert msg.content == "ok"
+    assert seen == ["dspro", "dspro"]  # 404 once, retried SAME provider, recovered
+
+
+def test_pool_fails_over_on_persistent_404(monkeypatch):
+    # A 404 that persists past the retry budget trips the provider and fails over
+    # to the next — a dead model must not kill the whole report.
+    import openai
+
+    from app.agent import llm_pool
+
+    seen = []
+
+    def fake_client(provider):
+        class C:
+            class chat:
+                class completions:
+                    @staticmethod
+                    def create(**k):
+                        seen.append(provider)
+                        if provider == "dspro":
+                            raise openai.NotFoundError("not found", response=_resp404(), body=None)
+                        return _Resp()
+        return C()
+
+    monkeypatch.setattr(llm_pool.settings, "nvidia_api_key", "k1")
+    monkeypatch.setattr(llm_pool, "_client", fake_client)
+    monkeypatch.setattr(llm_pool.time, "sleep", lambda s: None)
+
+    msg = llm_pool.chat([{"role": "user", "content": "hi"}], chain=["dspro", "nemo"])
+    assert msg.content == "ok"
+    # retried dspro up to the budget, then failed over to nemo
+    assert seen.count("dspro") == llm_pool._MAX_NOTFOUND_RETRIES and seen[-1] == "nemo"
 
 
 def test_pool_retries_empty_completion(monkeypatch):
