@@ -20,6 +20,7 @@
 import os
 import re
 import secrets
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -54,12 +55,13 @@ def _slugify_dist() -> dict[str, str]:
 
 
 def main() -> None:
-    token = _env("NETLIFY_AUTH_TOKEN")
-    site = _env("NETLIFY_SITE_ID")
+    # accept either naming (NETLIFY_AUTH_TOKEN/SITE_ID or NETLIFY_TOKEN/PROJECT_ID)
+    token = _env("NETLIFY_AUTH_TOKEN") or _env("NETLIFY_TOKEN")
+    site = _env("NETLIFY_SITE_ID") or _env("NETLIFY_PROJECT_ID")
     if not token or not site:
         raise SystemExit(
-            "Missing NETLIFY_AUTH_TOKEN and/or NETLIFY_SITE_ID in .env — see the "
-            "one-time setup at the top of web/deploy.py."
+            "Missing Netlify token/site in .env — set NETLIFY_TOKEN and "
+            "NETLIFY_PROJECT_ID (see the one-time setup atop web/deploy.py)."
         )
 
     use_slug = "--slug" in sys.argv
@@ -67,13 +69,15 @@ def main() -> None:
         p.stem: p.name for p in DIST.glob("*.html")
     }
 
+    # Windows ships npx as npx.cmd; subprocess (no shell) needs the resolved path.
+    npx = shutil.which("npx") or shutil.which("npx.cmd") or "npx"
     print("Deploying web/dist → Netlify ...", flush=True)
     proc = subprocess.run(
-        ["npx", "--yes", "netlify-cli", "deploy", "--prod", "--dir", str(DIST),
+        [npx, "--yes", "netlify-cli", "deploy", "--prod", "--dir", str(DIST),
          "--auth", token, "--site", site],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
-    out = proc.stdout + proc.stderr
+    out = (proc.stdout or "") + (proc.stderr or "")
     m = re.search(r"https://[^\s]+\.netlify\.app", out)
     base = m.group(0) if m else None
     if proc.returncode != 0 or not base:
