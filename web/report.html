@@ -60,6 +60,10 @@
 
   * { box-sizing: border-box; }
 
+  /* slim scroll-progress line — a quiet "you are here" cue that makes the
+     report feel like a guided journey rather than a static page */
+  .progress { position: fixed; top: 0; left: 0; height: 2px; width: 0; background: var(--accent); z-index: 50; }
+
   body {
     margin: 0;
     background: var(--surround);
@@ -129,8 +133,8 @@
   .mast { display: grid; grid-template-columns: 0.9fr 1.5fr 1.1fr; gap: clamp(1rem, 3vw, 2.4rem); padding: 0.4rem 0 1.4rem; align-items: start; }
   .mast-left { display: flex; flex-direction: column; gap: 0.9rem; }
   .crosshair { width: 30px; height: 30px; }
-  .headline { font-family: var(--sans); font-weight: 800; font-size: clamp(1.35rem, 2.9vw, 1.9rem); line-height: 1.02; letter-spacing: -0.01em; text-transform: uppercase; margin: 0; }
-  .headline .fade { color: var(--muted); }
+  .headline { font-family: var(--sans); font-weight: 800; font-size: clamp(1.35rem, 2.9vw, 1.9rem); line-height: 1.02; letter-spacing: -0.01em; text-transform: uppercase; margin: 0; background: var(--accent-tint); border-left: 3px solid var(--accent); border-radius: 3px; padding: 0.7rem 0.85rem; }
+  .headline .fade { color: var(--accent); opacity: 0.55; }
   .creed { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.1em; line-height: 1.85; text-transform: uppercase; color: var(--ink); }
   .barcode { height: 30px; display: flex; align-items: stretch; gap: 1px; max-width: 200px; }
   .barcode i { background: var(--ink); }
@@ -146,7 +150,7 @@
   .spec .row { display: flex; justify-content: space-between; gap: 1rem; padding: 0.12rem 0; letter-spacing: 0.06em; }
   .spec .k { color: var(--muted); text-transform: uppercase; }
   .spec .v { color: var(--ink); text-align: right; }
-  .dotmatrix { width: 100%; display: grid; gap: 4px; justify-content: end; }
+  .dotmatrix { width: 100%; display: grid; gap: 4px; justify-content: end; opacity: 0.55; }
   .dotmatrix i { width: 3px; height: 3px; border-radius: 50%; background: var(--ink); }
   .dotmatrix i.off { background: var(--hair-2); }
 
@@ -184,7 +188,8 @@
   .scoremeter i.on { background: var(--accent); }
 
   /* ---------- SECTION SCAFFOLD ---------- */
-  .sec { border-top: 1px solid var(--hair); padding: 1.5rem 0; }
+  /* more generous section rhythm — each block gets room to breathe */
+  .sec { border-top: 1px solid var(--hair); padding: 2rem 0; }
   .sec-grid { display: grid; grid-template-columns: 128px 1fr; gap: 1.5rem; }
   /* massive, elegant, low-weight chapter markers — they read like a watermark
      that belongs to the page, not a loud label sitting on top of it */
@@ -203,7 +208,7 @@
   .sec--iq       { background: var(--mint); }       /* 05·06 soft mint       */
   .sec--pipe     { background: var(--pipe-bg); }    /* 08 pale teal          */
   .sec--evidence { background: var(--neutral); }    /* 09 clean analytical   */
-  .sec--verdict  { background: var(--accent-deep); border-top-color: transparent; }  /* 07 dark teal */
+  .sec--verdict  { background: var(--accent-deep); border-top-color: transparent; padding-block: 3rem; }  /* 07 dark teal — the climax gets extra air */
   /* 03·04 strengths + risks stay on bare paper — the quiet minimal spread */
 
   .persona-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: clamp(1rem, 3vw, 2.4rem); }
@@ -212,21 +217,26 @@
   .dots { display: flex; gap: 4px; margin: 0.7rem 0; flex-wrap: wrap; }
   .dots i { width: 8px; height: 8px; border-radius: 50%; background: rgba(0, 122, 94, 0.16); }
   .dots i.on { background: var(--accent); }
-  .persona p { font-family: var(--sans); font-size: 0.92rem; line-height: 1.45; color: var(--ink-2); margin: 0.4rem 0 0.9rem; }
+  /* the review reads like a pulled quote — a thin accent rule invites the founder to stop and read */
+  .persona p { font-family: var(--sans); font-size: 0.95rem; line-height: 1.6; color: var(--ink-2); margin: 0.6rem 0 1.1rem; padding-left: 0.8rem; border-left: 2px solid var(--accent-line); }
   .persona .vs-lbl { font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
-  .persona .vs-val { font-family: var(--sans); font-weight: 700; font-size: 1.5rem; color: var(--accent); }
-  .persona .vs-val span { font-size: 0.9rem; color: var(--muted); font-weight: 400; }
+  .persona .vs-val { font-family: var(--sans); font-weight: 800; font-size: 1.9rem; line-height: 1; color: var(--accent); letter-spacing: -0.02em; }
+  .persona .vs-val span { font-size: 0.85rem; color: var(--muted); font-weight: 400; letter-spacing: 0; }
   /* low-confidence persona → warning accent (colour as navigation) */
+  .persona.low p { border-left-color: var(--warn-line); }
   .persona.low .dots i.on { background: var(--warn); }
   .persona.low .vs-val { color: var(--warn); }
 
   .exec-grid { display: grid; grid-template-columns: 1.55fr 0.5fr; gap: 2rem; align-items: stretch; }
-  .exec p { font-family: var(--sans); font-size: 1.02rem; line-height: 1.6; max-width: 52ch; margin: 0; }
-  .plusgrid { font-family: var(--mono); color: var(--ink-2); font-size: 0.95rem; line-height: 1.55; letter-spacing: 0.42em; text-align: right; white-space: pre; align-self: stretch; }
+  .exec p { font-family: var(--sans); font-size: 1.08rem; line-height: 1.72; max-width: 52ch; margin: 0; }
+  /* editorial drop-cap — the one focal point of the executive summary */
+  .exec p::first-letter { font-family: var(--sans); font-weight: 800; font-size: 3.2em; line-height: 0.72; float: left; margin: 0.06em 0.1em 0 0; color: var(--accent); }
+  /* muted to a faint texture so it reads as intentional grain, never as placeholder filler competing with the summary */
+  .plusgrid { font-family: var(--mono); color: var(--muted); opacity: 0.4; font-size: 0.9rem; line-height: 1.55; letter-spacing: 0.42em; text-align: right; white-space: pre; align-self: stretch; }
 
   .sr-grid { display: grid; grid-template-columns: 128px 1fr 220px 128px 1fr; gap: 1.2rem; align-items: start; }
-  .itemlist { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.7rem; }
-  .itemlist li { display: grid; grid-template-columns: 20px 1fr; gap: 0.6rem; align-items: start; font-family: var(--sans); font-size: 0.9rem; line-height: 1.35; color: var(--ink-2); }
+  .itemlist { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.95rem; }
+  .itemlist li { display: grid; grid-template-columns: 20px 1fr; gap: 0.6rem; align-items: start; font-family: var(--sans); font-size: 0.92rem; line-height: 1.5; color: var(--ink-2); }
   .itemlist .sym { position: relative; width: 16px; height: 16px; border-radius: 50%; border: 1.4px solid var(--muted); display: grid; place-items: center; margin-top: 0.12rem; }
   .itemlist .sym::before { content: ""; width: 7px; height: 1.4px; background: var(--muted); }
   /* strengths: emerald ⊕ on a soft tinted chip */
@@ -240,17 +250,21 @@
 
   .iq-grid { display: grid; grid-template-columns: 128px 1fr 128px 1fr; gap: 1.2rem; align-items: start; }
   .imp { list-style: none; margin: 0; padding: 0; }
-  .imp li { display: grid; grid-template-columns: 22px 1fr auto auto; gap: 0.8rem; align-items: center; padding: 0.55rem 0; border-bottom: 1px solid var(--hair-3); }
+  .imp li { display: grid; grid-template-columns: 22px 1fr auto auto; gap: 0.8rem; align-items: center; padding: 0.75rem 0; border-bottom: 1px solid var(--hair-3); }
   .imp .n { font-family: var(--mono); font-size: 0.62rem; color: #fff; background: var(--accent); width: 18px; height: 18px; border-radius: 3px; display: grid; place-items: center; }
   .imp .t { font-family: var(--sans); font-size: 0.9rem; line-height: 1.3; color: var(--ink-2); }
+  /* priority reads instantly from colour: high impact = emerald, medium = label, low = muted */
   .imp .impact { font-family: var(--mono); font-size: 0.6rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
-  .qs { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.75rem; }
-  .qs li { display: grid; grid-template-columns: 22px 1fr; gap: 0.7rem; align-items: start; font-family: var(--sans); font-size: 0.9rem; line-height: 1.35; color: var(--ink-2); }
+  .imp .impact--hi { color: var(--accent); font-weight: 700; }
+  .imp .impact--md { color: var(--label); }
+  .imp .impact--lo { color: var(--muted); }
+  .qs { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.95rem; }
+  .qs li { display: grid; grid-template-columns: 22px 1fr; gap: 0.7rem; align-items: start; font-family: var(--sans); font-size: 0.92rem; line-height: 1.5; color: var(--ink-2); }
   .qmark { width: 17px; height: 17px; border-radius: 50%; border: 1.4px solid var(--accent-line); background: var(--accent-tint); display: grid; place-items: center; font-family: var(--mono); font-size: 0.62rem; font-weight: 700; color: var(--accent); margin-top: 0.1rem; }
 
   .verdict-grid { display: grid; grid-template-columns: 128px 1.3fr 0.7fr; gap: 1.5rem; align-items: start; }
-  .verdict-h { font-family: var(--sans); font-weight: 800; text-transform: uppercase; font-size: clamp(1.9rem, 4.6vw, 3rem); line-height: 0.96; letter-spacing: -0.02em; margin: 0; text-wrap: balance; }
-  .verdict-sub { font-family: var(--sans); font-size: 0.92rem; line-height: 1.45; color: var(--ink-2); max-width: 52ch; margin: 0.9rem 0 1.3rem; }
+  .verdict-h { font-family: var(--sans); font-weight: 800; text-transform: uppercase; font-size: clamp(2.2rem, 5.2vw, 3.6rem); line-height: 0.94; letter-spacing: -0.025em; margin: 0; text-wrap: balance; }
+  .verdict-sub { font-family: var(--sans); font-size: 0.98rem; line-height: 1.6; color: var(--ink-2); max-width: 52ch; margin: 1.2rem 0 1.6rem; }
   .recbox { border: 1px solid var(--hair-2); border-radius: 4px; padding: 0.9rem 1.1rem; }
   .recbox .rtitle { font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.8rem; }
   .rec-cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
@@ -291,11 +305,11 @@
   .cov .stats2 .big { font-family: var(--sans); font-weight: 700; font-size: 1.2rem; line-height: 1; }
   .cov .stats2 .cap { font-family: var(--mono); font-size: 0.58rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
   .pglist { list-style: none; margin: 0; padding: 0; font-family: var(--mono); font-size: 0.72rem; }
-  .pglist li { display: grid; grid-template-columns: 1fr auto auto; gap: 0.5rem; align-items: center; padding: 0.16rem 0; }
+  .pglist li { display: grid; grid-template-columns: 1fr auto auto; gap: 0.5rem; align-items: center; padding: 0.3rem 0; border-bottom: 1px solid var(--hair-3); }
   .pglist .path { color: var(--muted); }
   .pglist .chk { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-tint); }
   .cited { list-style: none; margin: 0; padding: 0; font-family: var(--mono); font-size: 0.7rem; }
-  .cited li { display: grid; grid-template-columns: 18px 1fr auto; gap: 0.5rem; align-items: center; padding: 0.22rem 0; }
+  .cited li { display: grid; grid-template-columns: 18px 1fr auto; gap: 0.5rem; align-items: center; padding: 0.34rem 0; }
   .cited .cn { color: var(--accent); font-weight: 600; }
   .cited .url { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cited .bar { display: flex; align-items: center; gap: 0.5rem; }
@@ -312,6 +326,25 @@
   a { color: inherit; text-decoration: none; }
   a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
+  /* ---------- MOTION & MICRO-INTERACTION ----------
+     Understated, editorial, and only when the viewer allows motion.
+     Sections rise gently into view; persona quotes and pipeline steps
+     respond softly to hover. Nothing loud, nothing that distracts. */
+  @media (prefers-reduced-motion: no-preference) {
+    html.js .reveal { opacity: 0; transform: translateY(16px); transition: opacity 0.55s cubic-bezier(0.22, 0.61, 0.36, 1), transform 0.55s cubic-bezier(0.22, 0.61, 0.36, 1); }
+    html.js .reveal.in { opacity: 1; transform: none; }
+    .persona { transition: transform 0.25s ease; }
+    .persona:hover { transform: translateY(-3px); }
+    .pstep .picon { transition: background 0.25s ease, border-color 0.25s ease; }
+    .pstep .picon svg { transition: stroke 0.25s ease; }
+    .pstep:hover .picon { background: var(--accent); border-color: var(--accent); }
+    .pstep:hover .picon svg { stroke: #fff; }
+    .imp li { transition: background 0.2s ease; }
+    .imp li:hover { background: var(--accent-tint); }
+  }
+  /* on the dark verdict block the hover-lift needs no colour change */
+  .cited li, .pglist li { scroll-margin-top: 1rem; }
+
   @media (max-width: 860px) {
     .mast { grid-template-columns: 1fr; }
     .mast-right { align-items: flex-start; }
@@ -326,6 +359,12 @@
     .sec-grid { grid-template-columns: 1fr; gap: 0.8rem; }
   }
 </style>
+
+<!-- set synchronously so reveal-hiding applies before first paint (no flash);
+     if JS never runs, the 'js' class is absent and all content stays visible -->
+<script>document.documentElement.classList.add("js");</script>
+
+<div class="progress" id="progress" aria-hidden="true"></div>
 
 <div class="sheet">
   <span class="reg tl"></span><span class="reg tr"></span><span class="reg bl"></span><span class="reg br"></span>
@@ -432,7 +471,7 @@
   </div>
 
   <!-- ============ 01 PERSONAS ============ -->
-  <section class="sec band sec--personas">
+  <section class="sec band sec--personas reveal">
     <div class="sec-grid">
       <div class="gut"><div class="no">01</div><div class="nm">Personas</div><div class="gut-note">● filled = stronger<br>verdict · out of 10</div></div>
       <div class="persona-row" id="persona-row"></div>
@@ -440,7 +479,7 @@
   </section>
 
   <!-- ============ 02 EXECUTIVE SUMMARY ============ -->
-  <section class="sec band sec--exec">
+  <section class="sec band sec--exec reveal">
     <div class="sec-grid">
       <div class="gut"><div class="no">02</div><div class="nm">Executive<br>summary</div></div>
       <div class="exec-grid">
@@ -451,7 +490,7 @@
   </section>
 
   <!-- ============ 03 / 04 STRENGTHS + RISKS ============ -->
-  <section class="sec">
+  <section class="sec reveal">
     <div class="sr-grid">
       <div class="gut"><div class="no">03</div><div class="nm">Strengths /<br>positives</div></div>
       <ul class="itemlist plus" id="strengths-list"></ul>
@@ -472,7 +511,7 @@
   </section>
 
   <!-- ============ 05 / 06 IMPROVEMENTS + QUESTIONS ============ -->
-  <section class="sec band sec--iq">
+  <section class="sec band sec--iq reveal">
     <div class="iq-grid">
       <div class="gut"><div class="no">05</div><div class="nm">Top<br>improvement<br>ideas</div></div>
       <ul class="imp" id="imp-list"></ul>
@@ -482,7 +521,7 @@
   </section>
 
   <!-- ============ 07 FINAL VERDICT ============ -->
-  <section class="sec band sec--verdict">
+  <section class="sec band sec--verdict reveal">
     <div class="verdict-grid">
       <div class="gut"><div class="no">07</div><div class="nm">Final<br>verdict</div></div>
       <div>
@@ -498,7 +537,7 @@
   </section>
 
   <!-- ============ 08 HOW IT WORKS (trust pipeline) ============ -->
-  <section class="sec band sec--pipe">
+  <section class="sec band sec--pipe reveal">
     <div class="sec-grid">
       <div class="gut"><div class="no">08</div><div class="nm">How the<br>analysis<br>works</div></div>
       <div>
@@ -513,7 +552,7 @@
   </section>
 
   <!-- ============ 09 EVIDENCE & CITATIONS ============ -->
-  <section class="sec band sec--evidence">
+  <section class="sec band sec--evidence reveal">
     <div class="ev-grid">
       <div class="gut"><div class="no">09</div><div class="nm">Evidence &amp;<br>citations</div></div>
       <div>
@@ -717,9 +756,10 @@
 
     // ---- improvements ----
     $("imp-list").innerHTML = REPORT.improvements.map(function (im, i) {
+      var lvl = /high/i.test(im.impact) ? "hi" : /low/i.test(im.impact) ? "lo" : "md";
       return '<li><span class="n">' + String(i + 1).padStart(2, "0") + '</span>' +
         '<span class="t">' + esc(im.text) + '</span>' +
-        '<span class="impact">' + esc(im.impact) + '</span>' +
+        '<span class="impact impact--' + lvl + '">' + esc(im.impact) + '</span>' +
         '<span class="dots">' + dotsHTML(im.dots, 6) + '</span></li>';
     }).join("");
 
@@ -824,6 +864,36 @@
         var ang = Math.random() * Math.PI * 2, rr = Math.pow(Math.random(), 2) * 100;
         ctx.beginPath(); ctx.arc(cx + Math.cos(ang) * rr, cy + Math.sin(ang) * rr, rr < 30 ? 1.4 : 0.8, 0, Math.PI * 2); ctx.fill();
       }
+    }
+
+    // ---- scroll reveal: sections rise gently into view as the founder scrolls.
+    //      Safety-first: content is only ever hidden while JS is in control, and
+    //      revealAll() is exposed so PDF/screenshot tooling can force-show every
+    //      section before capture. A long fallback timer covers any edge case
+    //      where the observer never fires. ----
+    var reveals = document.querySelectorAll(".reveal");
+    function revealAll() { for (var i = 0; i < reveals.length; i++) reveals[i].classList.add("in"); }
+    window.__fieRevealAll = revealAll;
+    if (reduce || !("IntersectionObserver" in window)) {
+      revealAll();
+    } else {
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); } });
+      }, { rootMargin: "0px 0px -8% 0px", threshold: 0.08 });
+      reveals.forEach(function (el) { io.observe(el); });
+      setTimeout(revealAll, 8000);  // guarantee visibility even if the observer stalls
+    }
+
+    // ---- scroll-progress line ----
+    var prog = $("progress");
+    if (prog) {
+      var tick = function () {
+        var h = document.documentElement.scrollHeight - window.innerHeight;
+        prog.style.width = (h > 0 ? Math.min(window.scrollY / h, 1) * 100 : 0) + "%";
+      };
+      window.addEventListener("scroll", tick, { passive: true });
+      window.addEventListener("resize", tick);
+      tick();
     }
   })();
 </script>

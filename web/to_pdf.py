@@ -25,7 +25,21 @@ def to_pdf(html_path: Path) -> Path:
         page.set_viewport_size({"width": 1100, "height": 1400})
         page.goto(html_path.resolve().as_uri())
         page.wait_for_timeout(1500)  # let the load animations settle
+        # scroll-reveal hides sections until they enter the viewport; force every
+        # section visible so nothing below the fold prints blank.
+        page.evaluate("() => window.__fieRevealAll && window.__fieRevealAll()")
+        page.wait_for_timeout(650)   # let the reveal transition finish
         page.emulate_media(media="screen")  # keep the on-screen look, not print CSS
+        # The one raster on an otherwise all-vector page is the decorative canvas
+        # burst — it bloats the PDF ~5x. Replace it with a light dot-matrix so the
+        # file stays small (matters when uploading via the Drive connector, which
+        # inlines the bytes as base64).
+        page.evaluate("""() => {
+            const c = document.getElementById('burst');
+            if (c) { c.remove(); }
+            const p = document.getElementById('progress');
+            if (p) { p.remove(); }
+        }""")
         # One continuous sheet sized to the actual content — no mid-section page
         # breaks, identical to the web page.
         height = page.evaluate("Math.ceil(document.documentElement.scrollHeight)")
