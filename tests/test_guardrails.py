@@ -300,6 +300,47 @@ def test_pool_retries_transient_5xx_then_succeeds(monkeypatch):
     assert msg.content == "recovered" and calls["n"] == 2  # 1 failure + 1 retry
 
 
+def test_pool_fails_over_on_404(monkeypatch):
+    # A transient 404 (NIM cold-scale) on the first provider must fail over to
+    # the next, not kill the call. Regression: unitedtechlab normal run died on
+    # a single 404 mid-explore because NotFoundError was uncaught.
+    import httpx
+    import openai
+
+    from app.agent import llm_pool
+
+    resp404 = httpx.Response(404, request=httpx.Request("POST", "http://nvidia.test"))
+
+    class FakeMsg:
+        content = "recovered on next provider"
+        tool_calls = None
+
+    class FakeResp:
+        choices = [type("C", (), {"message": FakeMsg()})()]
+
+    seen = []
+
+    def fake_client(provider):
+        class C:
+            class chat:
+                class completions:
+                    @staticmethod
+                    def create(**k):
+                        seen.append(provider)
+                        if provider == "dsflash":
+                            raise openai.NotFoundError("not found", response=resp404, body=None)
+                        return FakeResp()
+        return C()
+
+    monkeypatch.setattr(llm_pool.settings, "nvidia_api_key", "k1")
+    monkeypatch.setattr(llm_pool, "_client", fake_client)
+    monkeypatch.setattr(llm_pool.time, "sleep", lambda s: None)
+
+    msg = llm_pool.chat([{"role": "user", "content": "hi"}], chain=["dsflash", "nemo"])
+    assert msg.content == "recovered on next provider"
+    assert seen == ["dsflash", "nemo"]  # 404'd first, failed over to second
+
+
 def test_pool_retries_empty_completion(monkeypatch):
     # A blank 200 completion must be retried, not returned — an empty body
     # crashed a persona node and killed the panel.

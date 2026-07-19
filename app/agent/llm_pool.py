@@ -332,4 +332,14 @@ def chat(
                 last_exc = exc
                 _trip(provider, _TRANSIENT_COOLDOWN)
                 break  # network/DNS blip on this provider → try the next
+            except openai.NotFoundError as exc:
+                # 404 = this model is momentarily unavailable (NIM cold-scale) or
+                # its id was retired. Treat like a dead provider: trip and fail
+                # over. A single transient 404 must NOT kill the whole report —
+                # caught live (2026-07-19, unitedtechlab normal run): one 404 mid-
+                # explore aborted the run instead of falling through to nemotron.
+                _tally(provider, model_name, "not_found_404")
+                last_exc = exc
+                _trip(provider, _TRANSIENT_COOLDOWN)
+                break  # model unavailable on this provider → try the next
     raise last_exc
