@@ -14,8 +14,8 @@
 
     /* warm off-white grounds — a rhythm of paper stocks, not one flat beige.
        Every value is a whisper away from the next; the eye reads change, not colour. */
-    --paper:     #F5F4F0;   /* main ground */
-    --surround:  #E6E5DE;   /* desk behind the sheet */
+    --paper:     #F6F4EE;   /* main ground — warm paper stock, not white */
+    --surround:  #E8E4DA;   /* desk behind the sheet — warmer, richer */
     --ivory:     #F8F4EA;   /* warm ivory */
     --gray:      #EFEEE8;   /* neutral warm grey — personas */
     --neutral:   #ECEAE1;   /* evidence — clean analytical neutral */
@@ -89,7 +89,7 @@
   /* very subtle paper grain — sits over the sheet, never over text legibility */
   .sheet::after {
     content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 5;
-    mix-blend-mode: multiply; opacity: 0.035;
+    mix-blend-mode: multiply; opacity: 0.05;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   }
   .sheet > * { position: relative; z-index: 1; }
@@ -189,7 +189,19 @@
 
   /* ---------- SECTION SCAFFOLD ---------- */
   /* more generous section rhythm — each block gets room to breathe */
-  .sec { border-top: 1px solid var(--hair); padding: 2rem 0; }
+  .sec { border-top: 1px solid var(--hair); padding: 2rem 0; position: relative; overflow: hidden; }
+  /* every real child sits above the watermark; the watermark alone stays behind */
+  .sec > *:not(.wm) { position: relative; z-index: 1; }
+
+  /* editorial watermark — an oversized thematic word bleeding off the corner
+     of each section at ~3.5% opacity. Felt, not read; it enriches the paper
+     instead of decorating the page. */
+  .wm { position: absolute; z-index: 0; right: -0.07em; bottom: -0.18em; margin: 0;
+        pointer-events: none; user-select: none; white-space: nowrap;
+        font-family: var(--sans); font-weight: 800; text-transform: uppercase;
+        letter-spacing: -0.045em; line-height: 0.72;
+        font-size: clamp(5rem, 19vw, 15rem); color: var(--ink); opacity: 0.035; }
+  .sec--verdict .wm { color: #fff; opacity: 0.06; }
   .sec-grid { display: grid; grid-template-columns: 128px 1fr; gap: 1.5rem; }
   /* massive, elegant, low-weight chapter markers — they read like a watermark
      that belongs to the page, not a loud label sitting on top of it */
@@ -510,6 +522,7 @@
 
   <!-- ============ 01 PERSONAS ============ -->
   <section class="sec band sec--personas reveal">
+    <span class="wm" aria-hidden="true">Voices</span>
     <div class="sec-grid">
       <div class="gut"><div class="no">01</div><div class="nm">Personas</div><div class="gut-note">● filled = stronger<br>verdict · out of 10</div></div>
       <div class="persona-row" id="persona-row"></div>
@@ -518,6 +531,7 @@
 
   <!-- ============ 02 EXECUTIVE SUMMARY ============ -->
   <section class="sec band sec--exec reveal">
+    <span class="wm" aria-hidden="true">Clarity</span>
     <div class="sec-grid">
       <div class="gut"><div class="no">02</div><div class="nm">Executive<br>summary</div></div>
       <div class="exec-grid">
@@ -529,6 +543,7 @@
 
   <!-- ============ 03 / 04 STRENGTHS + RISKS ============ -->
   <section class="sec reveal">
+    <span class="wm" aria-hidden="true">Balance</span>
     <div class="sr-grid">
       <div class="gut"><div class="no">03</div><div class="nm">Strengths /<br>positives</div></div>
       <ul class="itemlist plus" id="strengths-list"></ul>
@@ -543,6 +558,7 @@
 
   <!-- ============ 05 TOP IMPROVEMENT IDEAS ============ -->
   <section class="sec band sec--imp reveal">
+    <span class="wm" aria-hidden="true">Action</span>
     <div class="sec-grid">
       <div class="gut"><div class="no">05</div><div class="nm">Top<br>improvement<br>ideas</div></div>
       <ul class="imp" id="imp-list"></ul>
@@ -563,6 +579,7 @@
 
   <!-- ============ 06 UNANSWERED QUESTIONS ============ -->
   <section class="sec band sec--q reveal">
+    <span class="wm" aria-hidden="true">Open</span>
     <div class="sec-grid">
       <div class="gut"><div class="no">06</div><div class="nm">Unanswered<br>questions</div></div>
       <div>
@@ -577,6 +594,7 @@
 
   <!-- ============ 07 FINAL VERDICT ============ -->
   <section class="sec band sec--verdict reveal">
+    <span class="wm" aria-hidden="true">Verdict</span>
     <div class="verdict-grid">
       <div class="gut"><div class="no">07</div><div class="nm">Final<br>verdict</div></div>
       <div>
@@ -593,6 +611,7 @@
 
   <!-- ============ 08 HOW IT WORKS (trust pipeline) ============ -->
   <section class="sec band sec--pipe reveal">
+    <span class="wm" aria-hidden="true">Method</span>
     <div class="sec-grid">
       <div class="gut"><div class="no">08</div><div class="nm">How the<br>analysis<br>works</div></div>
       <div>
@@ -608,6 +627,7 @@
 
   <!-- ============ 09 EVIDENCE & CITATIONS ============ -->
   <section class="sec band sec--evidence reveal">
+    <span class="wm" aria-hidden="true">Proof</span>
     <div class="ev-grid">
       <div class="gut"><div class="no">09</div><div class="nm">Evidence &amp;<br>citations</div></div>
       <div>
