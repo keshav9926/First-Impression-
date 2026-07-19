@@ -41,8 +41,22 @@ CONTACTS = {
 
 HEADERS = [
     "Company", "Founder", "Title", "Site", "Founder Email", "Phone",
-    "LinkedIn", "Report Status", "Score Hint", "Sendable Report (email draft)",
+    "LinkedIn", "Report Status", "Score Hint", "Report Link",
+    "Sendable Report (email draft)",
 ]
+
+# Drive share links, filled AFTER you upload the PDFs to your own Drive.
+# Edit web/dist/links.json:  {"vortexify": "https://drive.google.com/…", …}
+# then re-run this builder — the link lands in the Report Link column AND
+# replaces <REPORT LINK> inside each email draft.
+LINKS_FILE = Path(__file__).resolve().parent.parent / "web" / "dist" / "links.json"
+
+
+def _load_links() -> dict:
+    try:
+        return json.loads(LINKS_FILE.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
 
 
 def _first_name(full: str) -> str:
@@ -67,7 +81,7 @@ def _sugg_lines(suggestions: list[dict], limit: int) -> list[str]:
     return out
 
 
-def sendable(contact: dict, rep: dict, pages: list[str]) -> str:
+def sendable(contact: dict, rep: dict, pages: list[str], link: str = "") -> str:
     """Distill a report dict into a paste-ready outreach email."""
     fn = _first_name(contact["founder"])
     company = rep.get("company") or contact["company"]
@@ -97,7 +111,7 @@ def sendable(contact: dict, rep: dict, pages: list[str]) -> str:
     parts += [
         "",
         "The full report — persona-by-persona reads, every claim cited to the exact page — "
-        "is here: <REPORT LINK>",
+        f"is here: {link or '<REPORT LINK>'}",
         "",
         "This reflects only your public pages as crawled (robots.txt respected), so anything "
         "behind auth or added since isn't covered. If any point is off, that itself is signal "
@@ -119,11 +133,16 @@ def main() -> None:
     for c in ws[1]:
         c.font = Font(bold=True)
 
-    widths = [16, 18, 22, 34, 28, 15, 38, 14, 12, 110]
+    widths = [16, 18, 22, 34, 28, 15, 38, 14, 12, 40, 110]
     for i, w in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
+    links = _load_links()
+    missing_links = []
     for key, contact in CONTACTS.items():
+        link = links.get(key, "")
+        if not link:
+            missing_links.append(key)
         path = REPORTS / f"{key}.json"
         if not path.exists():
             status, hint, draft = "NOT RUN", "", ""
@@ -133,15 +152,16 @@ def main() -> None:
                 rep = row["report"]
                 verdicts = row.get("panel_verdicts", {})
                 yes = sum(1 for v in verdicts.values() if v)
-                status = "READY"
+                status = "READY" if link else "READY (add link)"
                 hint = f"{yes}/{len(verdicts)} personas positive" if verdicts else ""
-                draft = sendable(contact, rep, row.get("pages_examined", []))
+                draft = sendable(contact, rep, row.get("pages_examined", []), link)
             else:
                 status = f"FAILED: {row.get('error_type')}"
                 hint, draft = "", (row.get("error") or "")[:300]
         ws.append([
             contact["company"], contact["founder"], contact["title"], contact["site"],
-            contact["email"], contact["phone"], contact["linkedin"], status, hint, draft,
+            contact["email"], contact["phone"], contact["linkedin"], status, hint,
+            link or "— upload PDF, add to links.json —", draft,
         ])
 
     # wrap the draft column, top-align everything
@@ -152,6 +172,9 @@ def main() -> None:
 
     wb.save(OUT)
     print(f"[xlsx] wrote {OUT}")
+    if missing_links:
+        print(f"[xlsx] NO Drive link yet for: {', '.join(missing_links)} — "
+              f"upload the PDF(s), then add to {LINKS_FILE} and re-run.")
 
 
 if __name__ == "__main__":
