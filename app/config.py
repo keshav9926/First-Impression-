@@ -91,8 +91,18 @@ class Settings(BaseSettings):
     nvidia_api_key: str = ""
     nvidia_glm_model: str = "z-ai/glm-5.2"
     nvidia_dspro_model: str = "deepseek-ai/deepseek-v4-pro"
+    nvidia_dsflash_model: str = "deepseek-ai/deepseek-v4-flash"
     nvidia_nemo_model: str = "nvidia/nemotron-3-ultra-550b-a55b"
     nvidia_mistral_model: str = "mistralai/mistral-medium-3.5-128b"
+
+    # Two report pipelines (2026-07-19 bake-off). "→" = failover: try the next
+    # model if one errors OR produces no valid report.
+    #   deep   (no time budget): glm-5.2 → v4-pro → v4-flash → nemotron
+    #   normal (fast, default):           v4-pro → v4-flash → nemotron
+    # GLM leads "deep" as the accuracy anchor; nemotron tails both as the fast,
+    # rock-solid 3/3 safety net. (mistral dropped — too slow; qwen/minimax/kimi
+    # unavailable or NVIDIA-degraded.)
+    pipeline_mode: str = "normal"  # "normal" | "deep"
 
     # Which provider the agent workloads (explore, personas, judge, synthesis)
     # try FIRST, then the rest of the chain as failover. "dspro" = DeepSeek-V4-Pro

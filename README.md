@@ -19,7 +19,7 @@ Full spec: [project.md](project.md)
 - **Refuses on empty evidence** — a report is never fabricated from an empty/near-empty store (robots-blocked or dead crawl → HTTP 409, not a hallucinated report)
 - **JS-site rendering** — static crawl escalates to a headless Playwright render when extraction is thin, so Framer/Webflow/SPA sites are readable
 - **Guardrails** — prompt-injection sanitizer pre-chunking + a groundedness judge that drops claims the cited page doesn't support
-- **Multi-provider LLM chain** — one NVIDIA NIM key drives a quality-first fallback chain (GLM-5.2 → DeepSeek-V4-Pro → Nemotron-3-Ultra → Mistral-Medium-3.5), with Gemini/Groq on separate keys as deep rate-limit insurance; automatic failover + circuit breaker + usage accounting
+- **Dual pipeline modes** — `normal` (fast default: DeepSeek-V4-Pro → V4-Flash → Nemotron) and `deep` (accuracy-first: GLM-5.2 → V4-Pro → V4-Flash → Nemotron); selectable per-request via `PIPELINE_MODE` env or the `use_mode()` context manager; automatic failover + circuit breaker + usage accounting
 - **MCP server** — the analyzer is exposed over the Model Context Protocol (stdio), so any MCP client (Claude Desktop, Claude Code, an IDE) can call `analyze_first_impression` / `ask_ingested` as native tools — the same pipeline the HTTP API serves, no drift
 - **Observability** — optional Langfuse tracing: each report is one span tree with every LLM call nested as a generation (model, token usage, latency). A hard no-op without keys, so nothing is paid for until you opt in
 - **Eval harness** — retrieval precision/recall evals over a curated dataset with configurable relevance-threshold tuning
@@ -56,9 +56,9 @@ POST /ask
 
 POST /report                       # ?panel=true → persona panel
   └── report.generate_report()     # refuses (409) if the store is empty/thin
-      └── explore ONCE (tools)      # llm_pool: GLM → Nemotron → Mistral (DeepSeek-Pro skipped: no tools)
+      └── explore ONCE (tools)      # llm_pool: chain selected by pipeline_mode
           └── panel (LangGraph)     # 3 personas judge the same evidence in parallel
-              └── synthesize        # GLM → … → Gemini → FirstImpressionReport
+              └── synthesize        # per-provider quality failover → FirstImpressionReport
                   └── apply_guards  # citation verify + groundedness judge + thin-crawl caveat
 
 POST /analyze/stream               # SSE: full ingest → report as live agent-step events
@@ -75,7 +75,8 @@ POST /analyze/stream               # SSE: full ingest → report as live agent-s
 | Vector store | ChromaDB |
 | Keyword search | BM25 (`rank-bm25`) |
 | Reranking | Voyage AI reranker |
-| LLM — Agent (explore / persona / synthesis) | NVIDIA NIM chain: GLM-5.2 → DeepSeek-V4-Pro → Nemotron-3-Ultra → Mistral-Medium-3.5 |
+| LLM — Agent `normal` mode | NVIDIA NIM: DeepSeek-V4-Pro → V4-Flash → Nemotron-3-Ultra |
+| LLM — Agent `deep` mode | NVIDIA NIM: GLM-5.2 → V4-Pro → V4-Flash → Nemotron-3-Ultra |
 | LLM — deep fallback | Gemini (`gemini-3.1-flash-lite` / `gemini-3-flash-preview`), Groq |
 | LLM — Q&A (`/ask`) | Groq (default) / Gemini / Claude |
 | JS rendering | Playwright (headless Chromium), lazy fallback |
@@ -141,17 +142,18 @@ Copy `.env.example` to `.env` and set the values:
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `VOYAGE_API_KEY` | ✅ | — | Voyage AI embeddings — free tier at [dashboard.voyageai.com](https://dashboard.voyageai.com) |
-| `NVIDIA_API_KEY` | ✅ | — | NVIDIA NIM — drives the whole agent chain (GLM-5.2 → DeepSeek → Nemotron → Mistral); free endpoints at [build.nvidia.com](https://build.nvidia.com) |
+| `NVIDIA_API_KEY` | ✅ | — | NVIDIA NIM — drives both pipeline chains; free endpoints at [build.nvidia.com](https://build.nvidia.com) |
 | `GEMINI_API_KEY` | Recommended | — | Deep fallback + native synthesis — [aistudio.google.com](https://aistudio.google.com) |
 | `GEMINI_SECONDACC_API_KEY` | Optional | — | 2nd Google account → 2× Gemini fallback headroom |
 | `GROQ_API_KEY` | Optional | — | Deep fallback — [console.groq.com](https://console.groq.com) |
 | `ANTHROPIC_API_KEY` | When `LLM_PROVIDER=anthropic` | — | Anthropic key (for `/ask` only) |
+| `PIPELINE_MODE` | — | `normal` | `normal` (fast: V4-Pro → V4-Flash → Nemotron) or `deep` (accuracy-first: GLM → V4-Pro → V4-Flash → Nemotron) |
 | `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | Optional | — | Both set → report runs are traced to Langfuse ([cloud.langfuse.com](https://cloud.langfuse.com)); absent → tracing is a no-op |
 | `LANGFUSE_HOST` | — | `https://cloud.langfuse.com` | Set to `https://us.cloud.langfuse.com` for the US region |
 | `EMBEDDING_MODEL` | — | `voyage-3.5` | Voyage embedding model |
 | `MIN_RELEVANCE` | — | `0.45` | Reranker score threshold below which answers are refused |
 
-> **Why one NVIDIA key for four models:** they're all free NVIDIA NIM endpoints on `integrate.api.nvidia.com`, so a single key fails over across GLM → DeepSeek-Pro → Nemotron → Mistral. Because they share one account quota, Gemini/Groq (different keys) stay as the real rate-limit insurance.
+> **Pipeline modes:** All NVIDIA models share one `integrate.api.nvidia.com` key and account quota. `normal` mode skips GLM-5.2 for speed (V4-Pro leads); `deep` mode leads with GLM-5.2 as the accuracy anchor. Gemini/Groq (separate keys) are the real rate-limit insurance across both chains.
 
 ---
 
@@ -258,6 +260,7 @@ uv run python evals/debug_retrieval.py
 | 6 | ✅ | Playwright JS rendering, streaming `/analyze/stream` dashboard, multi-provider pool (circuit breaker + usage accounting), evidence-floor guard |
 | 7 | ✅ | Custom MCP server (`app/mcp_server.py`) exposing the analyzer as stdio tools |
 | 8 | ✅ | Observability (optional Langfuse traces), finalized Docker deployment (Chromium in-image + persisted vector store) |
+| 9 | ✅ | Dual pipeline modes (`normal`/`deep`), DeepSeek-V4-Flash added to chain, synthesis robustness (JSON extraction, `response_format` fallback, `max_tokens` guard) |
 
 ---
 

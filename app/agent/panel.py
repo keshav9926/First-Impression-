@@ -29,7 +29,6 @@ import pydantic
 
 from app import events, observability
 from app.agent import groq_driver, llm_pool, personas
-from app.config import settings
 from app.schemas import FirstImpressionReport, PersonaImpression
 
 _PERSONA_RETRIES = 2  # JSON-mode replies occasionally malformed — one re-ask
@@ -54,7 +53,7 @@ def _explore_node(state: PanelState) -> dict:
 
 def _judge_as(persona: dict, evidence: str) -> PersonaImpression:
     """One persona's verdict over the shared evidence: JSON-mode reply via the
-    provider pool (prefer = settings.pool_prefer, the GLM-led NVIDIA chain),
+    provider pool (active pipeline chain — see llm_pool.use_mode),
     validated into PersonaImpression (retried once on malformed JSON)."""
     last_error: Exception = ValueError("no attempt made")
     for _ in range(_PERSONA_RETRIES):
@@ -63,7 +62,6 @@ def _judge_as(persona: dict, evidence: str) -> PersonaImpression:
                 {"role": "system", "content": personas.persona_system_prompt(persona)},
                 {"role": "user", "content": f"EVIDENCE:\n\n{evidence}"},
             ],
-            prefer=settings.pool_prefer,
             response_format={"type": "json_object"},
             label="persona-judge",
         )

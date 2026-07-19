@@ -75,6 +75,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--validate", action="store_true")
     ap.add_argument("--score-only", action="store_true")
+    ap.add_argument("--models", nargs="*", help="substring filters — re-test only these")
     args = ap.parse_args()
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -90,6 +91,8 @@ def main() -> None:
         return
 
     models = [MODELS[0]] if args.validate else MODELS
+    if args.models:
+        models = [m for m in MODELS if any(f in m for f in args.models)]
     companies = [COMPANIES[0]] if args.validate else COMPANIES
     print(f"[bo2] {len(models)}x{len(companies)} | embed={settings.embed_provider} "
           f"rerank={settings.rerank_provider} steps={BAKEOFF_STEPS} gate={TIME_GATE_S}s", flush=True)

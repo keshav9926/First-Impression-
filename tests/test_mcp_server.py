@@ -54,7 +54,7 @@ def test_analyze_reports_insufficient_evidence(monkeypatch):
     monkeypatch.setattr(mcp_server, "is_allowed", lambda url: True)
     monkeypatch.setattr(mcp_server, "_ingest_site", lambda url, mp: None)
 
-    def _boom(panel):
+    def _boom(panel, mode="normal"):
         raise InsufficientEvidenceError("nothing to ground")
 
     monkeypatch.setattr(mcp_server, "generate_report", _boom)
@@ -68,7 +68,7 @@ def test_analyze_happy_path(monkeypatch):
     monkeypatch.setattr(mcp_server, "_ingest_site", lambda url, mp: None)
     steps = [{"tool": "read_page", "args": {"url": "https://acme.co"}}]
     monkeypatch.setattr(
-        mcp_server, "generate_report", lambda panel: (_fake_report(), steps, ["https://acme.co"])
+        mcp_server, "generate_report", lambda panel, mode="normal": (_fake_report(), steps, ["https://acme.co"])
     )
     out = mcp_server.analyze_first_impression("https://acme.co")
     assert out["status"] == "ok"
@@ -82,7 +82,7 @@ def test_analyze_clamps_max_pages(monkeypatch):
     seen = {}
     monkeypatch.setattr(mcp_server, "is_allowed", lambda url: True)
     monkeypatch.setattr(mcp_server, "_ingest_site", lambda url, mp: seen.update(mp=mp))
-    monkeypatch.setattr(mcp_server, "generate_report", lambda panel: (_fake_report(), [], []))
+    monkeypatch.setattr(mcp_server, "generate_report", lambda panel, mode="normal": (_fake_report(), [], []))
     mcp_server.analyze_first_impression("https://acme.co", max_pages=9999)
     assert seen["mp"] == mcp_server.settings.max_pages_hard_limit
 

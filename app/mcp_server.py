@@ -52,7 +52,9 @@ def _report_keys_missing() -> str | None:
 
 
 @mcp.tool()
-def analyze_first_impression(url: str, max_pages: int = 15, panel: bool = True) -> dict:
+def analyze_first_impression(
+    url: str, max_pages: int = 15, panel: bool = True, deep: bool = False
+) -> dict:
     """Analyze a startup's public site and return a grounded First Impression report.
 
     Crawls the URL (robots.txt-respecting, public pages only), builds a hybrid
@@ -84,7 +86,9 @@ def analyze_first_impression(url: str, max_pages: int = 15, panel: bool = True) 
                 "reason": "robots.txt disallows fetching this URL (public-data rule).",
             }
         _ingest_site(url, max_pages)
-        report_obj, steps_log, pages_examined = generate_report(panel=panel)
+        report_obj, steps_log, pages_examined = generate_report(
+            panel=panel, mode="deep" if deep else "normal"
+        )
     except InsufficientEvidenceError as exc:
         # Robots-blocked or dead crawl → too thin to ground. Refuse, don't invent.
         return {"status": "insufficient_evidence", "reason": str(exc)}

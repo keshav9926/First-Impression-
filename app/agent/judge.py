@@ -162,7 +162,6 @@ def verify_groundedness(report: FirstImpressionReport) -> FirstImpressionReport:
                 },
                 {"role": "user", "content": prompt},
             ],
-            prefer=settings.pool_prefer,
             response_format={"type": "json_object"},
             # Enough tokens for one small verdict per claim so the JSON array is
             # not cut mid-stream (truncated tails default to "kept" — see

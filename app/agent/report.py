@@ -14,7 +14,7 @@
 #   main.py report() → generate_report() → groq_driver.generate() / run_panel()
 
 from app import observability
-from app.agent import grounding, groq_driver, judge
+from app.agent import grounding, groq_driver, judge, llm_pool
 from app.rag import store
 from app.schemas import FirstImpressionReport
 
@@ -60,10 +60,15 @@ def apply_guards(report: FirstImpressionReport) -> FirstImpressionReport:
     return report
 
 
-def generate_report(panel: bool = False) -> tuple[FirstImpressionReport, list[dict], list[str]]:
-    """Produce the structured report using the configured agent provider.
+def generate_report(
+    panel: bool = False, mode: str = "normal"
+) -> tuple[FirstImpressionReport, list[dict], list[str]]:
+    """Produce the structured report using the selected pipeline.
 
     Called by: main.py report(). Returns (report, steps_log, pages_examined).
+    `mode` picks the failover chain (llm_pool): "normal" (v4-pro→v4-flash→
+    nemotron) or "deep" (glm→v4-pro→v4-flash→nemotron, no time budget). Every
+    LLM call in the run inherits it via llm_pool.use_mode.
     May raise provider rate-limit errors — the endpoint maps them to HTTP codes.
     panel=True runs the Phase 4 LangGraph persona panel (explore once → three
     personas in parallel → merged report with persona_panel attached).
@@ -85,17 +90,20 @@ def generate_report(panel: bool = False) -> tuple[FirstImpressionReport, list[di
     # LLM call below — explore, personas, judge, synthesis — nests under this
     # span automatically via llm_pool.chat's record_generation.
     pages = sorted({c.get("url", "") for c in chunks if c.get("url")})
-    with observability.report_trace(panel=panel, chunks=len(chunks), pages=len(pages)):
-        observability.update_trace_io(input={"pages": pages, "panel": panel})
+    # use_mode selects the failover chain for EVERY llm_pool.chat call below
+    # (explore, personas, synthesis, judge) — no need to thread `mode` through.
+    with llm_pool.use_mode(mode), observability.report_trace(
+        panel=panel, mode=mode, chunks=len(chunks), pages=len(pages)
+    ):
+        observability.update_trace_io(input={"pages": pages, "panel": panel, "mode": mode})
 
         if panel:
             from app.agent.panel import run_panel  # local: langgraph import stays optional
 
             report, steps_log, pages_examined = run_panel()
         else:
-            # Single-agent path: explore + synthesize on the NVIDIA pool
-            # (groq_driver is the OpenAI-compat driver; despite the legacy name
-            # it runs on settings.pool_prefer, the GLM-led NVIDIA chain).
+            # Single-agent path: explore + synthesize on the active pipeline chain
+            # (groq_driver is the OpenAI-compat driver; the chain is set by use_mode).
             report, steps_log, pages_examined = groq_driver.generate()
 
         if not panel:

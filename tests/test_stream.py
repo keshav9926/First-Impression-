@@ -37,7 +37,7 @@ def test_analyze_stream_emits_events_then_report(monkeypatch):
 
         return IngestResponse(pages_fetched=1, chunks_stored=1, skipped_by_robots=0)
 
-    def fake_report(panel=False):
+    def fake_report(panel=False, mode="normal"):
         from app.schemas import FirstImpressionReport
 
         events.emit("tool", name="list_pages", args={})

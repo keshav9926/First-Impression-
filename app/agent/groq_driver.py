@@ -17,6 +17,7 @@
 #   report.py generate_report() → generate()   (when agent_provider == "groq")
 
 import json
+import logging
 import re
 
 import pydantic
@@ -25,6 +26,8 @@ from app import events, observability
 from app.agent import llm_pool, prompts, tools
 from app.config import settings
 from app.schemas import FirstImpressionReport
+
+logger = logging.getLogger("first_impression")
 
 # The report JSON shape, for providers WITHOUT native response_schema (the NVIDIA
 # chain over OpenAI-compat). Mirrors FirstImpressionReport minus persona_panel,
@@ -41,37 +44,72 @@ _REPORT_JSON_SHAPE = (
 )
 
 
-def _synthesize_via_pool(synthesis_prompt: str) -> FirstImpressionReport | None:
-    """Synthesize via the finalized NVIDIA chain (GLM → DeepSeek-Pro → Nemotron →
-    Mistral) over OpenAI-compat JSON mode. Returns a validated report, or None if
-    the whole chain produced nothing parseable (caller then falls back to Gemini).
+def _extract_report_json(raw: str) -> dict | None:
+    """Pull a JSON object out of a synthesis reply, tolerating what real models
+    actually emit: <think> preamble (reasoning models), ```json fences, and
+    leading/trailing prose. Strict parse first, then a balanced-brace scan from
+    the first '{' to its matching close (robust to trailing text)."""
+    if not raw:
+        return None
+    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL | re.IGNORECASE)
+    raw = re.sub(r"```(?:json)?", "", raw).strip()
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+    start = raw.find("{")
+    if start < 0:
+        return None
+    depth = 0
+    for i in range(start, len(raw)):
+        if raw[i] == "{":
+            depth += 1
+        elif raw[i] == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(raw[start : i + 1])
+                except json.JSONDecodeError:
+                    return None
+    return None  # never balanced → truncated mid-object
+
+
+def _synthesize_one(provider: str, synthesis_prompt: str) -> FirstImpressionReport | None:
+    """Try synthesis on ONE specific model. Returns a validated report, or None
+    if that model errors / emits nothing parseable (caller then tries the next
+    model in the chain — this is the '→ if it fails, next' failover).
+
+    Robustness (each fixed a real model failure, 2026-07-19):
+    - max_tokens=8000: without it, verbose models hit the provider's small
+      default and the JSON truncated mid-object (gpt-oss-120b, deepseek-v4-flash).
+    - response_format fallback: some NVIDIA-hosted models 500 on
+      response_format=json_object ('invalid type: unit variant' — qwen3.5); on
+      error we retry WITHOUT it, leaning on the 'reply ONLY with JSON' prompt.
     """
     system = (
         prompts.EXPLORE_SYSTEM
         + "\n\nReply ONLY with JSON of this exact shape (no other keys, no prose):\n"
         + _REPORT_JSON_SHAPE
     )
-    try:
-        message = llm_pool.chat(
-            [{"role": "system", "content": system},
-             {"role": "user", "content": synthesis_prompt}],
-            prefer=settings.pool_prefer,
-            response_format={"type": "json_object"},
-            label="synthesize",
-        )
-    except Exception:
-        return None  # whole NVIDIA chain unavailable → Gemini fallback
-    raw = message.content or ""
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", raw, re.DOTALL)  # salvage a truncated/wrapped object
-        if not match:
-            return None
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": synthesis_prompt},
+    ]
+    message = None
+    for use_json_mode in (True, False):  # json-mode first, then plain if rejected
+        kwargs = {"chain": [provider], "label": "synthesize", "max_tokens": 8000}
+        if use_json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
         try:
-            data = json.loads(match.group(0))
-        except json.JSONDecodeError:
-            return None
+            message = llm_pool.chat(messages, **kwargs)
+            break
+        except Exception:
+            continue
+    if message is None:
+        return None
+    data = _extract_report_json(message.content or "")
+    if data is None:
+        return None
     data.pop("persona_panel", None)  # attached programmatically, never from the LLM
     try:
         return FirstImpressionReport.model_validate(data)
@@ -130,8 +168,7 @@ def explore() -> tuple[list, list[dict]]:
             _trim_history(messages)  # bound the resent context before each call
             message = llm_pool.chat(
                 messages,
-                prefer=settings.pool_prefer,
-                tools=tools.OPENAI_TOOLS,
+                tools=tools.OPENAI_TOOLS,   # order = active pipeline chain (use_mode)
                 tool_choice="auto",
                 label="explore-step",
             )
@@ -210,11 +247,12 @@ def synthesize(context: str, extra_context: str = "") -> FirstImpressionReport:
     Called by: generate() below and agent/panel.py (which passes the persona
     panel's findings as extra_context so the final report can reflect them).
 
-    Runs on the finalized NVIDIA quality chain (GLM-5.2 → DeepSeek-V4-Pro →
-    Nemotron-3-Ultra → Mistral-Medium-3.5) via the pool, over OpenAI-compat JSON
-    mode. If the WHOLE chain returns nothing parseable, we HARD-FAIL (ValueError)
-    rather than silently degrading — a visible failure the caller maps to a 502,
-    which is recoverable by retry, beats shipping a half-baked report.
+    Walks the ACTIVE pipeline chain (deep: glm→dspro→dsflash→nemo, or
+    normal: dspro→dsflash→nemo) and returns the FIRST model that produces a
+    valid report — failing over not just on API errors but on unparseable/
+    invalid output too (a bad report is a failure). If EVERY model in the chain
+    fails, we HARD-FAIL (ValueError → 502): a visible, retryable failure beats
+    shipping a half-baked report.
     """
     synthesis_prompt = (
         "Below is the raw exploration log from a ReAct agent that examined the "
@@ -225,11 +263,14 @@ def synthesize(context: str, extra_context: str = "") -> FirstImpressionReport:
         + prompts.SYNTHESIZE_INSTRUCTION
     )
 
-    report = _synthesize_via_pool(synthesis_prompt)
-    if report is not None:
-        return report
+    chain = llm_pool.chain_for()  # active mode's ordered, key-available providers
+    for provider in chain:
+        report = _synthesize_one(provider, synthesis_prompt)
+        if report is not None:
+            return report
+        logger.warning("synthesis: %s produced no valid report — failing over", provider)
     raise ValueError(
-        "Synthesis produced no parseable report from the NVIDIA chain — retry the request."
+        f"Synthesis failed on every model in the chain ({', '.join(chain)}) — retry."
     )
 
 

@@ -248,7 +248,7 @@ def ask(request: AskRequest) -> AskResponse:
 
 
 @app.post("/report", response_model=ReportResponse)
-def report(panel: bool = False) -> ReportResponse:
+def report(panel: bool = False, deep: bool = False) -> ReportResponse:
     """Produce the structured First Impression report from ingested content.
 
     Called by: the client (you). Takes no body — it analyzes whatever site is
@@ -272,7 +272,9 @@ def report(panel: bool = False) -> ReportResponse:
         raise HTTPException(status_code=409, detail="Nothing ingested yet — call /ingest first.")
 
     try:
-        report_obj, steps_log, pages_examined = generate_report(panel=panel)
+        report_obj, steps_log, pages_examined = generate_report(
+            panel=panel, mode="deep" if deep else "normal"
+        )
     except voyageai.error.RateLimitError:
         # The agent's search_content tool calls Voyage; free-tier limit → 429.
         raise HTTPException(
@@ -319,7 +321,7 @@ def report(panel: bool = False) -> ReportResponse:
 _STATIC_DIR = Path(__file__).parent / "static"
 
 
-def _analysis_worker(url: str, max_pages: int, panel: bool, q: queue.Queue) -> None:
+def _analysis_worker(url: str, max_pages: int, panel: bool, deep: bool, q: queue.Queue) -> None:
     """Run the FULL pipeline (ingest → report) on a background thread, emitting
     progress into `q` via events.collector. The sync clients (Groq/Voyage/
     LangGraph) are blocking, so a thread keeps the SSE generator responsive.
@@ -328,7 +330,9 @@ def _analysis_worker(url: str, max_pages: int, panel: bool, q: queue.Queue) -> N
         try:
             _ingest_site(url, max_pages)
             events.emit("phase", name="analyze")
-            report_obj, steps_log, pages_examined = generate_report(panel=panel)
+            report_obj, steps_log, pages_examined = generate_report(
+                panel=panel, mode="deep" if deep else "normal"
+            )
             events.emit(
                 "report.done",
                 report=report_obj.model_dump(),
@@ -343,15 +347,17 @@ def _analysis_worker(url: str, max_pages: int, panel: bool, q: queue.Queue) -> N
 
 
 @app.get("/analyze/stream")
-def analyze_stream(url: str, max_pages: int = 15, panel: bool = True) -> StreamingResponse:
+def analyze_stream(
+    url: str, max_pages: int = 15, panel: bool = True, deep: bool = False
+) -> StreamingResponse:
     """Server-Sent Events: run ingest+report for `url` and stream each step
     (crawl.page, render.escalate, ingest.done, tool, persona, report.done) so
     the dashboard can show the agent working live. One event per SSE 'data:'
-    line as compact JSON."""
+    line as compact JSON. deep=true uses the extreme-depth pipeline."""
     _require_keys(voyage=True)
     q: queue.Queue = queue.Queue()
     threading.Thread(
-        target=_analysis_worker, args=(url, max_pages, panel, q), daemon=True
+        target=_analysis_worker, args=(url, max_pages, panel, deep, q), daemon=True
     ).start()
 
     def event_stream():

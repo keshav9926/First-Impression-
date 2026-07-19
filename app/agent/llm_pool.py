@@ -25,6 +25,8 @@
 #   groq_driver.explore()/synthesize() / panel._judge_as() / judge.verify_groundedness()
 #     → chat(messages, prefer=..., tools=/response_format=...)
 
+import contextlib
+import contextvars
 import logging
 import re
 import time
@@ -53,11 +55,42 @@ _TRANSIENT_COOLDOWN = 60.0  # 1 min — throttle/5xx/empty; re-probe soon
 _DAILY_MARKERS = ("per day", "tokens per day", "tpd", "rpd", "daily")
 
 
-# Failover chain, in preference order after the caller's `prefer`. The finalized
-# NVIDIA quality chain (all one nvapi- key, integrate.api.nvidia.com).
-#   glm → dspro → nemo → mistral
-_PROVIDERS = ("glm", "dspro", "nemo", "mistral")
-_NVIDIA_PROVIDERS = ("glm", "dspro", "nemo", "mistral")
+# Every NVIDIA model we know how to call (one nvapi key, integrate.api).
+_NVIDIA_PROVIDERS = ("glm", "dspro", "dsflash", "nemo", "mistral")
+
+# The two report pipelines (see config.pipeline_mode). "→" = failover order.
+_CHAINS = {
+    "deep": ("glm", "dspro", "dsflash", "nemo"),   # accuracy-first, no time budget
+    "normal": ("dspro", "dsflash", "nemo"),        # fast default
+}
+
+# Per-request pipeline selection (set by report.generate_report via use_mode).
+# A contextvar so concurrent requests don't clobber each other; falls back to
+# settings.pipeline_mode when unset.
+_mode_var: contextvars.ContextVar = contextvars.ContextVar("pipeline_mode", default=None)
+
+
+def _active_mode() -> str:
+    return _mode_var.get() or settings.pipeline_mode
+
+
+@contextlib.contextmanager
+def use_mode(mode: str):
+    """Select the failover chain for everything run inside this block."""
+    token = _mode_var.set(mode)
+    try:
+        yield
+    finally:
+        _mode_var.reset(token)
+
+
+def chain_for(mode: str | None = None) -> list:
+    """Ordered, key-available providers for a mode — used by callers that must
+    fail over on CONTENT quality (synthesis), not just API errors."""
+    chain = _CHAINS.get(mode or _active_mode(), _CHAINS["normal"])
+    return [p for p in chain if _provider_key(p)]
+
+
 # Providers to skip when tools= is requested (the explore loop). Empty as of the
 # 2026-07-18 bake-off: DeepSeek-V4-Pro (dspro), previously blocklisted here, ran
 # the explore loop cleanly (17 tool steps) against integrate.api — the earlier
@@ -92,6 +125,7 @@ def _client(provider: str):
 _NVIDIA_MODEL_ATTR = {
     "glm": "nvidia_glm_model",
     "dspro": "nvidia_dspro_model",
+    "dsflash": "nvidia_dsflash_model",
     "nemo": "nvidia_nemo_model",
     "mistral": "nvidia_mistral_model",
 }
@@ -176,22 +210,32 @@ def _live(order: list) -> list:
 
 def chat(
     messages: list,
-    prefer: str = "glm",
+    prefer: str | None = None,
+    mode: str | None = None,
+    chain: list | None = None,
     label: str = "llm-call",
     **kwargs,
 ):
     """chat.completions.create with retry + cross-provider failover.
 
-    Returns the response's .choices[0].message.
+    Failover ORDER is resolved as (first that applies):
+      chain=[...]  → those exact providers (used by synthesis quality-failover);
+      mode="deep"/"normal" → that pipeline's chain;
+      prefer="glm" → that provider first, then the rest (legacy / tests);
+      else → the active pipeline's chain (use_mode / settings.pipeline_mode).
     kwargs pass through: tools=, tool_choice=, response_format=, max_tokens=.
-    `label` names the Langfuse generation (e.g. "explore-step", "persona-judge",
-    "synthesize") — best practice: an active, stable name, model kept as its own
-    attribute. No-op when tracing is off.
+    `label` names the Langfuse generation. No-op when tracing is off.
     Raises the LAST provider's error only when ALL providers are exhausted.
     """
-    # Caller's preferred provider first, then the rest of the chain. De-duped,
-    # and any provider without a key is skipped rather than auth-erroring.
-    order = [prefer] + [p for p in _PROVIDERS if p != prefer]
+    if chain is not None:
+        order = list(chain)
+    elif mode is not None:
+        order = list(_CHAINS.get(mode, _CHAINS["normal"]))
+    elif prefer is not None:
+        order = [prefer] + [p for p in _NVIDIA_PROVIDERS if p != prefer]
+    else:
+        order = list(_CHAINS.get(_active_mode(), _CHAINS["normal"]))
+    # De-duped; any provider without a key is skipped rather than auth-erroring.
     seen: set = set()
     order = [
         p for p in order
