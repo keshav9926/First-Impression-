@@ -35,8 +35,14 @@ from app.ingestion.robots import is_allowed
 
 logger = logging.getLogger("first_impression")
 
-# Paths that hint at authenticated / non-public areas — rule #1 says we never try these.
-BLOCKED_PATH_HINTS = ("login", "signin", "sign-in", "signup", "sign-up", "account", "logout")
+# Path SEGMENTS that mark authenticated / non-public areas — rule #1 says we
+# never try these. Matched as whole segments (not substrings) so real content
+# paths like /accounts-receivable or /joining-guide are NOT wrongly blocked
+# (substring "account" was blocking a collections product's core pages).
+BLOCKED_PATH_HINTS = (
+    "login", "signin", "sign-in", "signup", "sign-up",
+    "account", "accounts", "logout", "auth", "register",
+)
 
 # File types we can't turn into text (PDF support could come later).
 SKIP_EXTENSIONS = (
@@ -79,6 +85,9 @@ class Page:
 # The same function also flags the POST-render result: a genuinely content-rich
 # rendered page has far more than this, so it won't be caveated.
 _THIN_SEED_MAX_TEXT_CHARS = 1200  # seed text below this → treat as thin, try rendering
+# Below this many discovered pages, a static crawl likely missed JS-injected
+# nav (SPA) — escalate to headless render, which can see those links.
+_MIN_STATIC_PAGES = 3
 
 
 def _is_thin_extraction(seed_text_chars: int, seed_html_chars: int) -> bool:
@@ -111,6 +120,17 @@ class CrawlResult:
     skipped_by_robots: int
     extraction_ratio: float = 1.0
     thin_extraction: bool = False
+
+
+def _canonical(url: str) -> str:
+    """Canonical form for crawl de-duplication: strip trailing slash and drop
+    query/fragment. Without this, 'site.com' vs 'site.com/' and 'site.com/?r=0'
+    were treated as DISTINCT pages — inflating page counts (collectwise showed
+    '2 pages' that were really 1) and wasting the crawl budget on duplicates.
+    Marketing sites rarely key distinct content on query strings, so dropping
+    them is safe here."""
+    p = urlparse(url)
+    return f"{p.scheme}://{p.netloc}{p.path.rstrip('/')}"
 
 
 class _LinkCollector(HTMLParser):
@@ -285,11 +305,13 @@ def _extract_links(html: str, base_url: str, domain: str) -> list[str]:
         absolute, _fragment = urldefrag(urljoin(base_url, href))
         parts = urlparse(absolute)
         path = parts.path.lower()
+        segments = [s for s in path.split("/") if s]
         if (
             parts.scheme in ("http", "https")
             and parts.netloc == domain  # stay on the starting site
             and not path.endswith(SKIP_EXTENSIONS)
-            and not any(hint in path for hint in BLOCKED_PATH_HINTS)
+            # whole-segment match: /login blocked, /accounts-receivable allowed
+            and not any(seg in BLOCKED_PATH_HINTS for seg in segments)
         ):
             links.append(absolute)
     return links
@@ -320,8 +342,9 @@ def _crawl_loop(start_url: str, max_pages: int, fetch) -> CrawlResult:
     (JS-rendered) passes — everything else (robots gate, extraction, link
     discovery, thin detection) is identical, so the two passes can't drift."""
     domain = urlparse(start_url).netloc
-    queue = [start_url]
-    seen = {start_url}
+    start = _canonical(start_url)
+    queue = [start]
+    seen = {start}
     pages: list[Page] = []
     skipped_by_robots = 0
     seed_text_chars = 0  # the FIRST fetched page's text/html — the thin signal
@@ -352,9 +375,10 @@ def _crawl_loop(start_url: str, max_pages: int, fetch) -> CrawlResult:
         # Feed new same-domain links into the queue (works for JS nav too —
         # the rendered pass discovers links a static fetch never sees).
         for link in _extract_links(html, base_url=url, domain=domain):
-            if link not in seen:
-                seen.add(link)
-                queue.append(link)
+            clink = _canonical(link)  # de-dupe trailing-slash / query variants
+            if clink not in seen:
+                seen.add(clink)
+                queue.append(clink)
 
         time.sleep(settings.request_delay_seconds)  # politeness delay
 
@@ -377,10 +401,17 @@ def crawl(start_url: str, max_pages: int) -> CrawlResult:
     with httpx.Client(headers=headers, follow_redirects=True, timeout=15.0) as client:
         result = _crawl_loop(start_url, max_pages, lambda u: _static_fetch(client, u))
 
-    if not result.thin_extraction:
+    # Escalate to headless render on EITHER signal:
+    #   - thin_extraction: the seed page is a JS shell (little text), OR
+    #   - too few pages: link discovery found almost nothing, which on an SPA
+    #     means the nav is JS-injected and a static fetch can't see it (this is
+    #     why collectwise analyzed only 1 real page). Rendering finds those links.
+    if not result.thin_extraction and len(result.pages) >= _MIN_STATIC_PAGES:
         return result
 
-    logger.info("thin static extraction (%s) — escalating to headless render", start_url)
+    reason = "thin static extraction" if result.thin_extraction else (
+        f"only {len(result.pages)} page(s) found (JS-injected nav?)")
+    logger.info("%s (%s) — escalating to headless render", reason, start_url)
     events.emit("render.escalate", url=start_url)
     try:
         with render.browser_session() as browser:

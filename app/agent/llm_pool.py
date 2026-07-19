@@ -58,9 +58,12 @@ _DAILY_MARKERS = ("per day", "tokens per day", "tpd", "rpd", "daily")
 #   glm → dspro → nemo → mistral
 _PROVIDERS = ("glm", "dspro", "nemo", "mistral")
 _NVIDIA_PROVIDERS = ("glm", "dspro", "nemo", "mistral")
-# DeepSeek-V4-Pro fails tool-calling (verified) — skip it when tools are wanted
-# (the explore loop), or it errors instead of serving. Fine for persona/synthesis.
-_NO_TOOLS = ("dspro",)
+# Providers to skip when tools= is requested (the explore loop). Empty as of the
+# 2026-07-18 bake-off: DeepSeek-V4-Pro (dspro), previously blocklisted here, ran
+# the explore loop cleanly (17 tool steps) against integrate.api — the earlier
+# "fails tool-calling" note no longer holds for this endpoint. Re-add a provider
+# id here if a model starts erroring on tool calls instead of serving.
+_NO_TOOLS: tuple[str, ...] = ()
 _NVIDIA_BASE = "https://integrate.api.nvidia.com/v1"
 
 

@@ -34,7 +34,9 @@ _INJECTION_PATTERNS = [
         r"forget (all |any |your |the )?(previous|prior|above|earlier) instructions",
         r"you are now\b",
         r"new (system )?instructions?:",
-        r"system prompt",
+        # Bare "system prompt" stripped legit copy on AI-product sites (docs
+        # that MENTION prompts). Require an instruction verb around it.
+        r"(ignore|disregard|forget|reveal|override|leak|print|repeat).{0,30}system prompt",
         r"\bact as\b.{0,40}\b(instead|now)\b",
         r"do not (mention|reveal|tell).{0,40}(user|instructions|prompt)",
         r"(respond|reply|answer) (only )?with\b.{0,60}(regardless|no matter)",

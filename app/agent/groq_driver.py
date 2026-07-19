@@ -82,6 +82,32 @@ def _synthesize_via_pool(synthesis_prompt: str) -> FirstImpressionReport | None:
 # providers (Groq + Cerebras). Step cap lives in settings.agent_max_steps.
 
 
+# --- history bounding (the explore-loop resend pain point) -----------------
+# The ReAct loop resends the ENTIRE conversation every turn. Left unbounded, by
+# turn 7 that means re-sending every read_page observation (~4000 chars each) 7
+# times — the dominant cost of a slow report. Fix: keep only the most recent
+# observations verbatim (the model just acted on those); collapse older tool
+# results to a short head + a pointer to search_content. Cumulative and in-place
+# — a page read 3 turns ago no longer costs its full text on every later turn.
+# Structure is untouched (only `tool` message CONTENT shrinks), so the API's
+# tool_call/tool_result pairing stays valid.
+_KEEP_FULL_OBS = 2
+_TRIM_OBS_TO = 600
+
+
+def _trim_history(messages: list) -> None:
+    tool_positions = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
+    older = tool_positions[:-_KEEP_FULL_OBS] if len(tool_positions) > _KEEP_FULL_OBS else []
+    for i in older:
+        content = messages[i].get("content") or ""
+        if len(content) > _TRIM_OBS_TO:
+            messages[i]["content"] = (
+                content[:_TRIM_OBS_TO]
+                + " […earlier observation truncated to save context; "
+                "use search_content to re-retrieve specifics if needed]"
+            )
+
+
 def explore() -> tuple[list, list[dict]]:
     """Phase A: the Groq ReAct tool-calling loop. Returns (messages, steps_log).
 
@@ -101,6 +127,7 @@ def explore() -> tuple[list, list[dict]]:
     # (explore-step) and the retriever/tool calls it triggers nest under it.
     with observability.span("explore", as_type="agent"):
         for _ in range(settings.agent_max_steps):
+            _trim_history(messages)  # bound the resent context before each call
             message = llm_pool.chat(
                 messages,
                 prefer=settings.pool_prefer,

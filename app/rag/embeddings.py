@@ -17,10 +17,47 @@
 
 import time
 
+import openai
 import voyageai
 import voyageai.error
 
 from app.config import settings
+
+# --- NVIDIA embeddings (embed_provider="nvidia") --------------------------
+# integrate.api /v1/embeddings, OpenAI-compatible. No 3-req/min throttle (the
+# reason for the switch), so no pacing — just light retry on transient errors.
+# input_type MUST differ for docs vs queries (asymmetric retrieval), same as
+# Voyage. Vectors are 2048-dim, so a store built with this can't be queried by
+# Voyage vectors (and vice-versa) — re-ingest when switching providers.
+_NVIDIA_EMBED_BASE = "https://integrate.api.nvidia.com/v1"
+_NVIDIA_EMBED_BATCH = 64  # bound payload size; no rate reason to keep it small
+_NVIDIA_EMBED_RETRIES = 4
+
+
+def _nvidia_client() -> openai.OpenAI:
+    return openai.OpenAI(base_url=_NVIDIA_EMBED_BASE, api_key=settings.nvidia_api_key)
+
+
+def _nvidia_embed(texts: list[str], input_type: str) -> list[list[float]]:
+    """Embed texts with the NVIDIA model. input_type: 'passage' | 'query'."""
+    client = _nvidia_client()
+    out: list[list[float]] = []
+    for start in range(0, len(texts), _NVIDIA_EMBED_BATCH):
+        batch = texts[start : start + _NVIDIA_EMBED_BATCH]
+        for attempt in range(_NVIDIA_EMBED_RETRIES):
+            try:
+                resp = client.embeddings.create(
+                    model=settings.nvidia_embed_model, input=batch,
+                    encoding_format="float",
+                    extra_body={"input_type": input_type, "truncate": "END"},
+                )
+                out.extend(d.embedding for d in resp.data)
+                break
+            except (openai.RateLimitError, openai.InternalServerError, openai.APIConnectionError):
+                if attempt == _NVIDIA_EMBED_RETRIES - 1:
+                    raise
+                time.sleep(2 ** attempt)
+    return out
 
 # --- Free-tier pacing ---
 # Without a payment method, Voyage allows 3 requests/minute and 10K tokens/
@@ -81,6 +118,8 @@ def embed_documents(texts: list[str]) -> list[list[float]]:
     per batch — sleeping between batches to respect the 3-requests/minute cap.
     Output goes to: store.replace_all(), paired back up with its chunks.
     """
+    if settings.embed_provider == "nvidia":
+        return _nvidia_embed(texts, "passage")
     client = _client()
     vectors: list[list[float]] = []
     batches = _make_batches(texts)
@@ -117,6 +156,8 @@ def embed_query(question: str) -> list[float]:
     Retries free-tier 429s by pacing into the next per-minute window; other
     Voyage errors propagate (callers map them to HTTP status codes).
     """
+    if settings.embed_provider == "nvidia":
+        return _nvidia_embed([question], "query")[0]
     for attempt in range(_MAX_QUERY_RETRIES):
         try:
             result = _client().embed(

@@ -168,7 +168,10 @@ def verify_groundedness(report: FirstImpressionReport) -> FirstImpressionReport:
             # not cut mid-stream (truncated tails default to "kept" — see
             # _parse_verdicts — so avoiding the cut avoids keeping unverified
             # claims). The NVIDIA chain has the headroom.
-            max_tokens=4000,
+            # 8000 (was 4000): failover models (e.g. Nemotron) spend "thinking"
+            # tokens from this same budget before the JSON — 4000 could truncate
+            # verdicts on long claim lists, and truncated tails default to KEPT.
+            max_tokens=8000,
             label="groundedness-judge",
         )
         verdicts = _parse_verdicts(message.content or "")

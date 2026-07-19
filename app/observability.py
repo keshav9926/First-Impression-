@@ -107,14 +107,32 @@ def report_trace(name: str = "analyze-first-impression", **metadata):
     if not enabled():
         yield None
         return
+    # Guard ONLY Langfuse's own machinery. The caller's body must never be
+    # caught here: swallowing it and yielding again turns every real pipeline
+    # error (a 400, a quota 429) into "generator didn't stop after throw()" —
+    # which masked real failures and broke main.py's error mapping.
     try:
-        with _client.start_as_current_observation(
+        cm = _client.start_as_current_observation(
             name=name, as_type="span", metadata=metadata or None
-        ) as active:
-            yield active
+        )
+        active = cm.__enter__()
     except Exception:
         logger.exception("report_trace failed — continuing without tracing")
         yield None
+        return
+    try:
+        yield active  # body exceptions propagate to the caller untouched
+    except BaseException as exc:
+        try:
+            cm.__exit__(type(exc), exc, exc.__traceback__)
+        except Exception:
+            logger.exception("Langfuse span exit failed")
+        raise
+    else:
+        try:
+            cm.__exit__(None, None, None)
+        except Exception:
+            logger.exception("Langfuse span exit failed")
     finally:
         try:
             _client.flush()
@@ -132,14 +150,30 @@ def span(name: str, as_type: str = "span", input=None, metadata=None):
     if not enabled():
         yield None
         return
+    # Same body-vs-machinery separation as report_trace: never swallow the
+    # caller's exception (that masks real errors); only guard Langfuse itself.
     try:
-        with _client.start_as_current_observation(
+        cm = _client.start_as_current_observation(
             name=name, as_type=as_type, input=input, metadata=metadata
-        ) as obs:
-            yield obs
+        )
+        obs = cm.__enter__()
     except Exception:
         logger.exception("span %s failed — continuing", name)
         yield None
+        return
+    try:
+        yield obs
+    except BaseException as exc:
+        try:
+            cm.__exit__(type(exc), exc, exc.__traceback__)
+        except Exception:
+            logger.exception("span %s exit failed", name)
+        raise
+    else:
+        try:
+            cm.__exit__(None, None, None)
+        except Exception:
+            logger.exception("span %s exit failed", name)
 
 
 def update_trace_io(*, input=None, output=None) -> None:

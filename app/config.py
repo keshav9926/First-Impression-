@@ -95,8 +95,10 @@ class Settings(BaseSettings):
     nvidia_mistral_model: str = "mistralai/mistral-medium-3.5-128b"
 
     # Which provider the agent workloads (explore, personas, judge, synthesis)
-    # try FIRST. "glm" = the finalized quality-first NVIDIA chain above.
-    pool_prefer: str = "glm"
+    # try FIRST, then the rest of the chain as failover. "dspro" = DeepSeek-V4-Pro
+    # (2026-07-18 bake-off: cleanest full-pipeline run — explored fine with tools,
+    # rich synthesis, ~8 min vs GLM's ~30). glm/nemo/mistral remain as failover.
+    pool_prefer: str = "dspro"
 
     # --- LEGACY: which LLM runs the /report agent ---
     # No longer routes anything (2026-07-18): the report pipeline is NVIDIA-only
@@ -137,20 +139,52 @@ class Settings(BaseSettings):
     langfuse_host: str = "https://cloud.langfuse.com"
     langfuse_base_url: str = ""
 
-    # --- Embeddings (Voyage AI) — used by embeddings.py ---
+    # --- Retrieval backends (embeddings + rerank) ---
+    # Switched to NVIDIA (2026-07-19) to kill the wall-clock bottleneck: Voyage's
+    # free tier caps at 3 requests/MINUTE, so every search_content during a report
+    # ate ~20s waits. NVIDIA's embed/rerank endpoints have no such throttle (and
+    # the bake-off showed nemotron-3-embed matched/edged Voyage on MRR). Trade-off:
+    # everything now shares ONE NVIDIA account quota. Set either back to "voyage"
+    # to revert (keys retained below).
+    # embeddings -> NVIDIA: removes the biggest throttle (all of ingestion + the
+    # query-embed on every search_content) at no accuracy cost (bake-off MRR tie).
+    embed_provider: str = "nvidia"   # "nvidia" | "voyage"
+    # rerank stays VOYAGE for now: NVIDIA rerank returns strongly-negative logits
+    # (relevant ~-7, junk ~-14) that sigmoid bunches near 0, so the calibrated
+    # min_relevance gate would reject real content. Voyage's 0..1 keeps the gate
+    # valid. Flip to "nvidia" only after picking a logit threshold from real
+    # multi-company data. (Reranker reads TEXT, so NVIDIA-embed + Voyage-rerank
+    # mix cleanly.)
+    rerank_provider: str = "voyage"  # "nvidia" | "voyage"
+
+    # NVIDIA retrieval models (embed via integrate.api /v1/embeddings, rerank via
+    # ai.api /v1/retrieval/nvidia/reranking). One nvapi- key serves both.
+    nvidia_embed_model: str = "nvidia/nemotron-3-embed-1b"     # 2048-dim
+    nvidia_rerank_model: str = "nvidia/rerank-qa-mistral-4b"   # returns logits
+    # NVIDIA rerank logits are strongly negative even for good matches (relevant
+    # ~-7, junk ~-14). A plain sigmoid bunches them near 0, breaking the 0..1
+    # gate. This SHIFTED sigmoid — 1/(1+exp(-(logit-center)/scale)) — recenters
+    # so relevant lands high and junk low. center/scale are provisional (from a
+    # handful of observations); re-fit from logged logits once we have more data.
+    nvidia_rerank_center: float = -10.0
+    nvidia_rerank_scale: float = 3.0
+
+    # --- Embeddings (Voyage AI) — used by embeddings.py when embed_provider="voyage" ---
     voyage_api_key: str = ""
     embedding_model: str = "voyage-3.5"
 
-    # --- Retrieval quality (Phase 2) — used by rerank.py + main.py ---
+    # --- Retrieval quality (Phase 2) — used by rerank.py when rerank_provider="voyage" ---
     rerank_model: str = "rerank-2.5-lite"
-    # Candidates scoring below this after re-ranking are treated as
-    # irrelevant; if NONE clear the bar, /ask answers "no relevant content"
-    # without calling the LLM. Tune with evals/run_retrieval_eval.py.
-    # 0.45 chosen from the 2026-07-12 eval run on vortexify.ai:
-    # lowest answerable top-score 0.480, highest unanswerable 0.424 → midpoint.
-    # NOTE: rerank-2.5-lite is 3rd gen. rerank-2.5 (full) is the real upgrade
-    # when scores need to be sharper — NOT rerank-2 (that is 2nd gen, older).
-    min_relevance: float = 0.45
+    # Candidates scoring below this after re-ranking are treated as irrelevant;
+    # if NONE clear the bar, /ask answers "no relevant content" without calling
+    # the LLM. 0.30 = a conservative SAFETY FLOOR (2026-07-19), not a tuned
+    # threshold: both eval runs put obvious junk well below 0.30 and real
+    # answers >= 0.48, so the floor only blocks clear garbage and can't eat
+    # real content. The ambiguous 0.40-0.50 band is handled by layer 2 — the
+    # qa.py prompt instructs the LLM to say plainly when excerpts don't contain
+    # the answer. Re-calibrate to a sharper value from logged top-scores after
+    # running many companies (evals/run_retrieval_eval.py).
+    min_relevance: float = 0.30
 
     # --- Vector store (Chroma) — used by store.py ---
     chroma_dir: str = "./chroma_data"  # where Chroma persists vectors on disk
