@@ -264,15 +264,16 @@
   .bal-mean { font-family: var(--mono); font-size: 0.6rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--label); text-align: center; }
   .bal-mean b { color: var(--accent); }
 
-  /* AI margin note — an editorial breathing moment between 05/06 and the
-     verdict. The quote is lifted VERBATIM from the findings above (never
-     invented); warn styling ties it to the attention register. */
-  .ainote { margin-top: 1.8rem; padding: 1.1rem 1.3rem; background: var(--warn-pale); border: 1px solid var(--warn-line); border-left: 3px solid var(--warn); border-radius: 3px; display: grid; grid-template-columns: 30px 1fr; gap: 0.9rem; align-items: start; }
-  .ainote .ai-ic { width: 26px; height: 26px; border-radius: 50%; background: var(--warn); display: grid; place-items: center; margin-top: 0.2rem; }
-  .ainote .ai-ic svg { width: 14px; height: 14px; stroke: #fff; stroke-width: 1.6; fill: none; stroke-linecap: round; stroke-linejoin: round; }
-  .ainote .ai-lbl { font-family: var(--mono); font-size: 0.6rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--warn); font-weight: 700; margin-bottom: 0.45rem; }
-  .ainote .ai-q { font-family: var(--sans); font-size: 1.18rem; font-weight: 600; line-height: 1.5; color: var(--ink); max-width: 62ch; text-wrap: balance; }
-  .ainote .ai-att { font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-top: 0.55rem; }
+  /* editorial pull quote — fills the whitespace under the questions column
+     (06) with a positive, engaging reward: one standout strength, verbatim.
+     Quiet emerald register (never the critical/warn one). It sinks to the
+     bottom of the tall row so the previously-empty space reads intentional. */
+  .qcol { display: flex; flex-direction: column; align-self: stretch; }
+  .pullq { margin: 2.4rem 0 0; padding: 1.5rem 0 0; border: 0; border-top: 1px solid var(--hair); }
+  .pullq blockquote { position: relative; margin: 0; padding-top: 1.7rem; font-family: var(--sans); font-weight: 600; font-size: 1.24rem; line-height: 1.46; letter-spacing: -0.01em; color: var(--ink); max-width: 40ch; text-wrap: balance; }
+  .pullq blockquote::before { content: "\201C"; position: absolute; top: -0.5rem; left: -0.15rem; font-family: var(--sans); font-weight: 800; font-size: 3.6rem; line-height: 1; color: var(--accent-line); }
+  .pullq figcaption { margin-top: 1rem; font-family: var(--mono); font-size: 0.6rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+  @media (min-width: 861px) { .pullq { margin-top: auto; } }  /* sink to the bottom of the empty column */
 
   .iq-grid { display: grid; grid-template-columns: 128px 1fr 128px 1fr; gap: 1.2rem; align-items: start; }
   .imp { list-style: none; margin: 0; padding: 0; }
@@ -535,14 +536,12 @@
       <div class="gut"><div class="no">05</div><div class="nm">Top<br>improvement<br>ideas</div></div>
       <ul class="imp" id="imp-list"></ul>
       <div class="gut"><div class="no">06</div><div class="nm">Unanswered<br>questions</div></div>
-      <ul class="qs" id="qs-list"></ul>
-    </div>
-    <div class="ainote" id="ainote" hidden>
-      <span class="ai-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z"/></svg></span>
-      <div>
-        <div class="ai-lbl">FIE · Margin note</div>
-        <div class="ai-q" id="ainote-q"></div>
-        <div class="ai-att">Verbatim friction signal — cited in section 04</div>
+      <div class="qcol">
+        <ul class="qs" id="qs-list"></ul>
+        <figure class="pullq" id="pullq" hidden>
+          <blockquote id="pullq-q"></blockquote>
+          <figcaption>First Impression Engine — standout strength</figcaption>
+        </figure>
       </div>
     </div>
   </section>
@@ -810,14 +809,15 @@
         '<div class="bal-mean">Persona verdict mean · <b class="tnum">' + mean.toFixed(1) + '</b> / 10</div>';
     }
 
-    // ---- AI margin note — elevate one risk ALREADY shown in section 04.
-    //      Selection is mechanical (shortest claim in pull-quote range), so the
-    //      note never editorializes beyond what the report itself says. ----
-    var note = $("ainote");
-    if (note) {
-      var pool = (REPORT.risks || []).filter(function (r) { return r.length >= 40 && r.length <= 220; });
-      var q = pool.sort(function (a, b) { return a.length - b.length; })[0] || (REPORT.risks || [])[0] || "";
-      if (q) { $("ainote-q").textContent = "“" + q + "”"; note.hidden = false; }
+    // ---- pull quote — elevate one standout STRENGTH already listed in 03,
+    //      verbatim, to fill the whitespace under 06 with a positive reward.
+    //      Mechanical selection (shortest strength in quote range) so it never
+    //      editorializes beyond what the report already says. ----
+    var pq = $("pullq");
+    if (pq) {
+      var spool = (REPORT.strengths || []).filter(function (s) { return s.length >= 40 && s.length <= 170; });
+      var sq = spool.sort(function (a, b) { return a.length - b.length; })[0] || (REPORT.strengths || [])[0] || "";
+      if (sq) { $("pullq-q").textContent = sq; pq.hidden = false; }
     }
 
     // ---- verdict ----
