@@ -1,23 +1,45 @@
 <title>FIE — First Impression Engine</title>
 <style>
   /* ================================================================
-     FIE · FIRST IMPRESSION ENGINE — engineering datasheet
-     Monochrome · white sheet · black ink · mono-forward
-     Deliberately single-theme: this is a printed spec sheet.
-     Every per-company value lives in the REPORT object (see <script>);
-     the backend swaps that object per company — the chrome is fixed.
+     FIE · FIRST IMPRESSION ENGINE — editorial datasheet
+     Warm off-white ground · deep-emerald accent · soft depth.
+     Single, committed light theme (a premium printed-report world).
+     Layout / hierarchy / content unchanged from the datasheet build;
+     this pass is colour + depth only. One accent (--accent) drives
+     everything — swap that one token to restyle the whole report.
      ================================================================ */
 
   :root {
-    --paper:    #FBFAF7;
-    --surround: #EDECE7;
-    --ink:      #16150F;
-    --ink-2:    #46453D;
-    --muted:    #9A998E;
-    --hair:     rgba(22, 21, 15, 0.90);
-    --hair-2:   rgba(22, 21, 15, 0.20);
-    --hair-3:   rgba(22, 21, 15, 0.10);
-    --mark:     rgba(230, 202, 88, 0.55);  /* the one accent: a highlighter marker */
+    --pad: clamp(1.1rem, 3vw, 2.4rem);   /* sheet padding = section bleed */
+
+    /* warm off-white grounds — subtly differentiated per section */
+    --paper:    #F5F4F0;   /* main ground */
+    --surround: #E6E5DE;   /* desk behind the sheet */
+    --ivory:    #F8F4EA;   /* executive summary — warm ivory */
+    --gray:     #EFEFEA;   /* personas / ideas — cool light gray */
+    --neutral:  #ECEAE1;   /* evidence — slightly darker neutral */
+    --pipe-bg:  #EAF1EE;   /* pipeline — emerald-tinted strip */
+    --chip-bg:  #E1EDE7;   /* solid tint for pipeline icon wells */
+
+    /* ink hierarchy — headings dark, body softer, labels gray, meta muted */
+    --ink:      #23231D;   /* headings / strong */
+    --ink-2:    #3F3F39;   /* body text (~#404040, warmed) */
+    --label:    #565650;   /* labels */
+    --muted:    #8C8B7F;   /* metadata */
+
+    /* soft dividers — no more heavy black hairlines */
+    --hair:     rgba(35, 35, 29, 0.14);
+    --hair-2:   rgba(35, 35, 29, 0.22);
+    --hair-3:   rgba(35, 35, 29, 0.09);
+
+    /* the ONE accent — Deep Emerald (swap this to restyle everything) */
+    --accent:      #007A5E;
+    --accent-deep: #06463A;   /* verdict block ground */
+    --accent-tint: rgba(0, 122, 94, 0.10);
+    --accent-line: rgba(0, 122, 94, 0.30);
+    --burst:       #5FC7AA;   /* light accent for the on-dark citation burst */
+    --mark:        rgba(0, 122, 94, 0.20);  /* highlighter, now accent-tinted */
+
     --sans: "Helvetica Neue", "Arial Nova", Arial, "Liberation Sans", sans-serif;
     --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, "Liberation Mono", Menlo, monospace;
     --fs: 12.5px;
@@ -41,16 +63,26 @@
     max-width: 1040px;
     margin: 0 auto;
     background: var(--paper);
-    border: 1.5px solid var(--ink);
-    padding: clamp(1.1rem, 3vw, 2.4rem);
+    border: 1px solid rgba(35, 35, 29, 0.10);
+    border-radius: 3px;
+    padding: var(--pad);
+    box-shadow: 0 1px 2px rgba(35, 35, 29, 0.04), 0 24px 60px -28px rgba(35, 35, 29, 0.22);
+    overflow: hidden;   /* keep bled section bands inside the rounded frame */
   }
+  /* very subtle paper grain — sits over the sheet, never over text legibility */
+  .sheet::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 5;
+    mix-blend-mode: multiply; opacity: 0.035;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  .sheet > * { position: relative; z-index: 1; }
 
-  /* printed-sheet corner register marks */
-  .reg { position: absolute; width: 13px; height: 13px; pointer-events: none; }
-  .reg.tl { top: 9px; left: 9px; border-top: 1.5px solid var(--ink); border-left: 1.5px solid var(--ink); }
-  .reg.tr { top: 9px; right: 9px; border-top: 1.5px solid var(--ink); border-right: 1.5px solid var(--ink); }
-  .reg.bl { bottom: 9px; left: 9px; border-bottom: 1.5px solid var(--ink); border-left: 1.5px solid var(--ink); }
-  .reg.br { bottom: 9px; right: 9px; border-bottom: 1.5px solid var(--ink); border-right: 1.5px solid var(--ink); }
+  /* corner register marks — now a quiet accent detail */
+  .reg { position: absolute; width: 13px; height: 13px; pointer-events: none; z-index: 6; }
+  .reg.tl { top: 9px; left: 9px; border-top: 1.5px solid var(--accent); border-left: 1.5px solid var(--accent); }
+  .reg.tr { top: 9px; right: 9px; border-top: 1.5px solid var(--accent); border-right: 1.5px solid var(--accent); }
+  .reg.bl { bottom: 9px; left: 9px; border-bottom: 1.5px solid var(--accent); border-left: 1.5px solid var(--accent); }
+  .reg.br { bottom: 9px; right: 9px; border-bottom: 1.5px solid var(--accent); border-right: 1.5px solid var(--accent); }
 
   .tnum { font-variant-numeric: tabular-nums; }
   .sans { font-family: var(--sans); }
@@ -58,7 +90,7 @@
   .fig { font-family: var(--mono); font-size: 0.56rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); text-align: center; margin-top: 0.55rem; }
 
   .lbl { font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.7rem; color: var(--muted); font-weight: 500; }
-  .inv { background: var(--ink); color: var(--paper); padding: 0.05em 0.35em; }
+  .inv { background: var(--accent); color: #fff; padding: 0.05em 0.35em; border-radius: 2px; }
   .rule { height: 1px; background: var(--hair); border: 0; margin: 0; }
   .dash { letter-spacing: 0.25em; color: var(--ink); font-weight: 700; }
 
@@ -112,14 +144,14 @@
   .about p b { color: var(--ink); font-weight: 600; }
   .agentic { font-family: var(--sans); font-weight: 700; font-size: 1.08rem; line-height: 1.4; color: var(--ink); margin: 0 0 0.85rem; max-width: 60ch; }
   .principles { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem; }
-  .principles span { font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.1em; text-transform: uppercase; border: 1px solid var(--hair-2); padding: 0.3rem 0.55rem; color: var(--ink); }
-  .principles span.key { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  .principles span { font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.1em; text-transform: uppercase; border: 1px solid var(--accent-line); background: var(--accent-tint); border-radius: 3px; padding: 0.3rem 0.55rem; color: var(--label); }
+  .principles span.key { background: var(--accent); color: #fff; border-color: var(--accent); }
   .madeby { margin-top: 1.1rem; font-family: var(--mono); font-size: 0.74rem; letter-spacing: 0.06em; color: var(--ink-2); display: flex; gap: 0.9rem; flex-wrap: wrap; align-items: center; }
-  .madeby .reach { font-size: 0.62rem; letter-spacing: 0.18em; text-transform: uppercase; color: var(--paper); background: var(--ink); padding: 0.28rem 0.5rem; }
+  .madeby .reach { font-size: 0.62rem; letter-spacing: 0.18em; text-transform: uppercase; color: #fff; background: var(--accent); border-radius: 3px; padding: 0.28rem 0.5rem; }
   .madeby .nm-name { color: var(--ink); font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; }
   .madeby .sep { color: var(--hair-2); }
-  .madeby a { border-bottom: 1px solid var(--hair-2); }
-  .madeby a:hover { border-color: var(--ink); }
+  .madeby a { color: var(--accent); border-bottom: 1px solid var(--accent-line); }
+  .madeby a:hover { border-color: var(--accent); }
 
   /* ---------- STATS BAR ---------- */
   .stats { display: grid; grid-template-columns: repeat(5, auto) 1fr; gap: clamp(0.8rem, 2.5vw, 2rem); align-items: center; border-top: 1px solid var(--hair); border-bottom: 1px solid var(--hair); padding: 1.1rem 0; }
@@ -127,30 +159,44 @@
   .stat .big { font-family: var(--sans); font-weight: 700; font-size: 1.6rem; line-height: 1; }
   .stat .big.sm { font-size: 1.05rem; padding-top: 0.35rem; }
   .stat .cap { font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); line-height: 1.4; }
-  .scorebox { border: 1px solid var(--ink); padding: 0.9rem 1.1rem; display: grid; grid-template-columns: 1fr auto; gap: 0.3rem 1rem; align-items: center; }
-  .scorebox .cap { grid-column: 1 / -1; font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
-  .scorebox .num { font-family: var(--sans); font-weight: 800; font-size: clamp(2.8rem, 7vw, 4.2rem); line-height: 0.85; letter-spacing: -0.03em; }
+  /* the score is the hero — tinted well, accent border rule, oversized accent number */
+  .scorebox { position: relative; overflow: hidden; border: 1px solid var(--accent-line); border-left: 3px solid var(--accent); border-radius: 4px; background: var(--accent-tint); padding: 0.9rem 1.1rem; display: grid; grid-template-columns: 1fr auto; gap: 0.3rem 1rem; align-items: center; }
+  .scorebox::before { content: ""; position: absolute; right: -30px; top: -30px; width: 90px; height: 90px; border-radius: 50%; background: var(--accent); opacity: 0.06; }
+  .scorebox .cap { grid-column: 1 / -1; font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  .scorebox .num { font-family: var(--sans); font-weight: 800; font-size: clamp(2.8rem, 7vw, 4.2rem); line-height: 0.85; letter-spacing: -0.03em; color: var(--accent); }
   .scorebox .num small { font-family: var(--mono); font-size: 1rem; font-weight: 400; color: var(--muted); letter-spacing: 0; }
-  .scorebox .pot { font-family: var(--mono); font-size: 0.8rem; letter-spacing: 0.1em; text-transform: uppercase; text-align: right; line-height: 1.3; }
+  .scorebox .pot { font-family: var(--mono); font-size: 0.8rem; letter-spacing: 0.1em; text-transform: uppercase; text-align: right; line-height: 1.3; color: var(--ink); }
   .scoremeter { grid-column: 1 / -1; display: flex; gap: 5px; margin-top: 0.5rem; }
-  .scoremeter i { width: 11px; height: 11px; border-radius: 50%; background: var(--hair-2); }
-  .scoremeter i.on { background: var(--ink); }
+  .scoremeter i { width: 11px; height: 11px; border-radius: 50%; background: rgba(0, 122, 94, 0.18); }
+  .scoremeter i.on { background: var(--accent); }
 
   /* ---------- SECTION SCAFFOLD ---------- */
   .sec { border-top: 1px solid var(--hair); padding: 1.5rem 0; }
   .sec-grid { display: grid; grid-template-columns: 128px 1fr; gap: 1.5rem; }
-  .gut .no { font-family: var(--sans); font-weight: 800; font-size: 2.2rem; line-height: 0.9; }
-  .gut .nm { font-family: var(--sans); font-weight: 700; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.02em; margin-top: 0.5rem; line-height: 1.15; }
+  .gut .no { font-family: var(--sans); font-weight: 800; font-size: 2.2rem; line-height: 0.9; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .gut .nm { font-family: var(--sans); font-weight: 700; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.02em; margin-top: 0.5rem; line-height: 1.15; color: var(--label); }
+
+  /* ---------- SECTION BAND TINTS ----------
+     Subtle per-section grounds that bleed to the sheet edge, giving the
+     report a light → neutral → highlight rhythm instead of one flat white.
+     padding-inline restores the content inset so every column stays aligned. */
+  .band { margin-inline: calc(-1 * var(--pad)); padding-inline: var(--pad); }
+  .sec--personas { background: var(--gray); }
+  .sec--exec     { background: var(--ivory); }
+  .sec--iq       { background: var(--gray); }
+  .sec--pipe     { background: var(--pipe-bg); }
+  .sec--evidence { background: var(--neutral); }
+  .sec--verdict  { background: var(--accent-deep); border-top-color: transparent; }
 
   .persona-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: clamp(1rem, 3vw, 2.4rem); }
   .persona .phead { display: flex; align-items: center; gap: 0.6rem; }
   .persona .pname { font-family: var(--sans); font-weight: 700; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.04em; }
   .dots { display: flex; gap: 4px; margin: 0.7rem 0; flex-wrap: wrap; }
-  .dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--hair-2); }
-  .dots i.on { background: var(--ink); }
+  .dots i { width: 8px; height: 8px; border-radius: 50%; background: rgba(0, 122, 94, 0.16); }
+  .dots i.on { background: var(--accent); }
   .persona p { font-family: var(--sans); font-size: 0.92rem; line-height: 1.45; color: var(--ink-2); margin: 0.4rem 0 0.9rem; }
   .persona .vs-lbl { font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
-  .persona .vs-val { font-family: var(--sans); font-weight: 700; font-size: 1.5rem; }
+  .persona .vs-val { font-family: var(--sans); font-weight: 700; font-size: 1.5rem; color: var(--accent); }
   .persona .vs-val span { font-size: 0.9rem; color: var(--muted); font-weight: 400; }
 
   .exec-grid { display: grid; grid-template-columns: 1.55fr 0.5fr; gap: 2rem; align-items: stretch; }
@@ -160,40 +206,59 @@
   .sr-grid { display: grid; grid-template-columns: 128px 1fr 220px 128px 1fr; gap: 1.2rem; align-items: start; }
   .itemlist { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.7rem; }
   .itemlist li { display: grid; grid-template-columns: 20px 1fr; gap: 0.6rem; align-items: start; font-family: var(--sans); font-size: 0.9rem; line-height: 1.35; color: var(--ink-2); }
-  .itemlist .sym { position: relative; width: 15px; height: 15px; border-radius: 50%; border: 1.4px solid var(--ink); display: grid; place-items: center; margin-top: 0.15rem; }
-  .itemlist .sym::before { content: ""; width: 7px; height: 1.4px; background: var(--ink); }
-  .itemlist.plus .sym::after { content: ""; width: 1.4px; height: 7px; background: var(--ink); position: absolute; }
+  .itemlist .sym { position: relative; width: 16px; height: 16px; border-radius: 50%; border: 1.4px solid var(--muted); display: grid; place-items: center; margin-top: 0.12rem; }
+  .itemlist .sym::before { content: ""; width: 7px; height: 1.4px; background: var(--muted); }
+  /* strengths: emerald ⊕ on a soft tinted chip */
+  .itemlist.plus .sym { border-color: var(--accent); background: var(--accent-tint); }
+  .itemlist.plus .sym::before { background: var(--accent); }
+  .itemlist.plus .sym::after { content: ""; width: 1.4px; height: 7px; background: var(--accent); position: absolute; }
   .diagram { display: grid; place-items: center; align-self: center; }
 
   .iq-grid { display: grid; grid-template-columns: 128px 1fr 128px 1fr; gap: 1.2rem; align-items: start; }
   .imp { list-style: none; margin: 0; padding: 0; }
   .imp li { display: grid; grid-template-columns: 22px 1fr auto auto; gap: 0.8rem; align-items: center; padding: 0.55rem 0; border-bottom: 1px solid var(--hair-3); }
-  .imp .n { font-family: var(--mono); font-size: 0.62rem; color: var(--paper); background: var(--ink); width: 18px; height: 18px; display: grid; place-items: center; }
-  .imp .t { font-family: var(--sans); font-size: 0.9rem; line-height: 1.3; }
+  .imp .n { font-family: var(--mono); font-size: 0.62rem; color: #fff; background: var(--accent); width: 18px; height: 18px; border-radius: 3px; display: grid; place-items: center; }
+  .imp .t { font-family: var(--sans); font-size: 0.9rem; line-height: 1.3; color: var(--ink-2); }
   .imp .impact { font-family: var(--mono); font-size: 0.6rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
   .qs { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.75rem; }
   .qs li { display: grid; grid-template-columns: 22px 1fr; gap: 0.7rem; align-items: start; font-family: var(--sans); font-size: 0.9rem; line-height: 1.35; color: var(--ink-2); }
-  .qmark { width: 17px; height: 17px; border-radius: 50%; border: 1.4px solid var(--ink); display: grid; place-items: center; font-family: var(--mono); font-size: 0.62rem; font-weight: 700; color: var(--ink); margin-top: 0.1rem; }
+  .qmark { width: 17px; height: 17px; border-radius: 50%; border: 1.4px solid var(--accent-line); background: var(--accent-tint); display: grid; place-items: center; font-family: var(--mono); font-size: 0.62rem; font-weight: 700; color: var(--accent); margin-top: 0.1rem; }
 
   .verdict-grid { display: grid; grid-template-columns: 128px 1.3fr 0.7fr; gap: 1.5rem; align-items: start; }
-  .verdict-h { font-family: var(--sans); font-weight: 800; text-transform: uppercase; font-size: clamp(1.9rem, 4.6vw, 3rem); line-height: 0.96; letter-spacing: -0.02em; margin: 0; }
+  .verdict-h { font-family: var(--sans); font-weight: 800; text-transform: uppercase; font-size: clamp(1.9rem, 4.6vw, 3rem); line-height: 0.96; letter-spacing: -0.02em; margin: 0; text-wrap: balance; }
   .verdict-sub { font-family: var(--sans); font-size: 0.92rem; line-height: 1.45; color: var(--ink-2); max-width: 52ch; margin: 0.9rem 0 1.3rem; }
-  .recbox { border: 1px solid var(--ink); padding: 0.9rem 1.1rem; }
+  .recbox { border: 1px solid var(--hair-2); border-radius: 4px; padding: 0.9rem 1.1rem; }
   .recbox .rtitle { font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.8rem; }
   .rec-cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
   .rec-cols .rk { font-family: var(--mono); font-size: 0.6rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
   .rec-cols .rv { font-family: var(--sans); font-weight: 700; font-size: 1.05rem; margin: 0.25rem 0 0.5rem; }
   .burst { display: grid; place-items: center; }
 
+  /* Final Verdict — the climax: light type on the deep-emerald block */
+  .sec--verdict .gut .no { color: #7FE0C7; }
+  .sec--verdict .gut .nm { color: rgba(255, 255, 255, 0.72); }
+  .sec--verdict .verdict-h { color: #fff; }
+  .sec--verdict .verdict-sub { color: rgba(255, 255, 255, 0.82); }
+  .sec--verdict .recbox { border-color: rgba(255, 255, 255, 0.22); background: rgba(255, 255, 255, 0.04); }
+  .sec--verdict .recbox .rtitle, .sec--verdict .rec-cols .rk { color: rgba(255, 255, 255, 0.6); }
+  .sec--verdict .rec-cols .rv { color: #fff; }
+  .sec--verdict .dots i { background: rgba(255, 255, 255, 0.2); }
+  .sec--verdict .dots i.on { background: #7FE0C7; }
+  .sec--verdict .fig { color: rgba(255, 255, 255, 0.5); }
+
   .pipe-wrap { overflow-x: auto; }
-  .pipe { display: flex; align-items: stretch; gap: 0; min-width: 760px; }
+  .pipe { position: relative; display: flex; align-items: stretch; gap: 0; min-width: 760px; }
+  /* connector line threading the icon wells */
+  .pipe::before { content: ""; position: absolute; top: 18px; left: 6px; right: 6px; height: 2px; background: var(--accent-line); z-index: 0; }
   .pstep { flex: 1; display: flex; flex-direction: column; gap: 0.45rem; padding-right: 0.4rem; }
-  .pstep .pname { font-family: var(--sans); font-weight: 700; font-size: 0.68rem; letter-spacing: 0.06em; text-transform: uppercase; }
+  .picon { position: relative; z-index: 1; width: 36px; height: 36px; border-radius: 50%; background: var(--chip-bg); border: 1px solid var(--accent-line); display: grid; place-items: center; }
+  .picon svg { width: 19px; height: 19px; stroke: var(--accent); }
+  .pstep .pname { font-family: var(--sans); font-weight: 700; font-size: 0.68rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink); }
   .pstep .pdesc { font-family: var(--sans); font-size: 0.68rem; line-height: 1.32; color: var(--ink-2); }
   .pstep .ptime { font-family: var(--mono); font-size: 0.6rem; color: var(--muted); letter-spacing: 0.04em; margin-top: auto; padding-top: 0.4rem; }
-  .parrow { display: grid; place-items: center; padding-top: 6px; color: var(--muted); }
+  .parrow { position: relative; z-index: 1; display: grid; place-items: start center; padding-top: 11px; color: var(--accent); }
   .pipe-foot { display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-top: 1.1rem; padding-top: 0.8rem; border-top: 1px solid var(--hair-3); font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.08em; color: var(--ink-2); }
-  .pipe-foot b { color: var(--ink); }
+  .pipe-foot b { color: var(--accent); }
 
   .ev-grid { display: grid; grid-template-columns: 128px 0.9fr 0.9fr 1.1fr; gap: 1.6rem; align-items: start; }
   .cov { display: flex; gap: 1rem; align-items: center; }
@@ -203,21 +268,24 @@
   .pglist { list-style: none; margin: 0; padding: 0; font-family: var(--mono); font-size: 0.72rem; }
   .pglist li { display: grid; grid-template-columns: 1fr auto auto; gap: 0.5rem; align-items: center; padding: 0.16rem 0; }
   .pglist .path { color: var(--muted); }
-  .pglist .chk { width: 6px; height: 6px; border-radius: 50%; background: var(--ink); }
+  .pglist .chk { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-tint); }
   .cited { list-style: none; margin: 0; padding: 0; font-family: var(--mono); font-size: 0.7rem; }
   .cited li { display: grid; grid-template-columns: 18px 1fr auto; gap: 0.5rem; align-items: center; padding: 0.22rem 0; }
-  .cited .cn { color: var(--muted); }
+  .cited .cn { color: var(--accent); font-weight: 600; }
   .cited .url { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cited .bar { display: flex; align-items: center; gap: 0.5rem; }
-  .cited .bar .b { height: 5px; background: var(--ink); }
+  .cited .bar .b { height: 6px; border-radius: 3px; background: var(--accent); }
   .cited .bar .v { color: var(--ink-2); min-width: 18px; text-align: right; }
-  .sectitle { font-family: var(--sans); font-weight: 700; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.7rem; }
+  .sectitle { font-family: var(--sans); font-weight: 700; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.7rem; color: var(--accent); }
+  /* coverage donut + its centre % read in accent */
+  #donut { stroke: var(--accent); stroke-linecap: round; }
+  #donut-pct { fill: var(--accent); }
 
-  .foot { border-top: 1.5px solid var(--ink); margin-top: 0.5rem; padding-top: 0.9rem; display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.1em; color: var(--ink-2); }
+  .foot { border-top: 2px solid var(--accent); margin-top: 0.5rem; padding-top: 0.9rem; display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.1em; color: var(--ink-2); }
   .foot .center { color: var(--ink); }
 
   a { color: inherit; text-decoration: none; }
-  a:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
   @media (max-width: 860px) {
     .mast { grid-template-columns: 1fr; }
@@ -339,7 +407,7 @@
   </div>
 
   <!-- ============ 01 PERSONAS ============ -->
-  <section class="sec">
+  <section class="sec band sec--personas">
     <div class="sec-grid">
       <div class="gut"><div class="no">01</div><div class="nm">Personas</div><div class="gut-note">● filled = stronger<br>verdict · out of 10</div></div>
       <div class="persona-row" id="persona-row"></div>
@@ -347,7 +415,7 @@
   </section>
 
   <!-- ============ 02 EXECUTIVE SUMMARY ============ -->
-  <section class="sec">
+  <section class="sec band sec--exec">
     <div class="sec-grid">
       <div class="gut"><div class="no">02</div><div class="nm">Executive<br>summary</div></div>
       <div class="exec-grid">
@@ -379,7 +447,7 @@
   </section>
 
   <!-- ============ 05 / 06 IMPROVEMENTS + QUESTIONS ============ -->
-  <section class="sec">
+  <section class="sec band sec--iq">
     <div class="iq-grid">
       <div class="gut"><div class="no">05</div><div class="nm">Top<br>improvement<br>ideas</div></div>
       <ul class="imp" id="imp-list"></ul>
@@ -389,7 +457,7 @@
   </section>
 
   <!-- ============ 07 FINAL VERDICT ============ -->
-  <section class="sec">
+  <section class="sec band sec--verdict">
     <div class="verdict-grid">
       <div class="gut"><div class="no">07</div><div class="nm">Final<br>verdict</div></div>
       <div>
@@ -405,7 +473,7 @@
   </section>
 
   <!-- ============ 08 HOW IT WORKS (trust pipeline) ============ -->
-  <section class="sec">
+  <section class="sec band sec--pipe">
     <div class="sec-grid">
       <div class="gut"><div class="no">08</div><div class="nm">How the<br>analysis<br>works</div></div>
       <div>
@@ -420,7 +488,7 @@
   </section>
 
   <!-- ============ 09 EVIDENCE & CITATIONS ============ -->
-  <section class="sec">
+  <section class="sec band sec--evidence">
     <div class="ev-grid">
       <div class="gut"><div class="no">09</div><div class="nm">Evidence &amp;<br>citations</div></div>
       <div>
@@ -677,7 +745,7 @@
     ];
     var arrow = '<div class="parrow"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M2 8h11M9 4l4 4-4 4"/></svg></div>';
     $("pipe").innerHTML = PIPELINE.map(function (s, i) {
-      var step = '<div class="pstep"><svg class="ic" style="width:24px;height:24px" viewBox="0 0 24 24">' + ICONS[i] + '</svg>' +
+      var step = '<div class="pstep"><span class="picon"><svg class="ic" viewBox="0 0 24 24">' + ICONS[i] + '</svg></span>' +
         '<div class="pname">' + esc(s[0]) + '</div><div class="pdesc">' + esc(s[1]) + '</div><div class="ptime">' + esc(s[2]) + '</div></div>';
       return step + (i < PIPELINE.length - 1 ? arrow : "");
     }).join("");
@@ -724,8 +792,8 @@
     var cv = $("burst");
     if (cv && cv.getContext) {
       var ctx = cv.getContext("2d"), W = cv.width, H = cv.height, cx = W / 2, cy = H / 2;
-      var ink = getComputedStyle(document.documentElement).getPropertyValue("--ink").trim() || "#16150F";
-      ctx.fillStyle = ink;
+      var burst = getComputedStyle(document.documentElement).getPropertyValue("--burst").trim() || "#5FC7AA";
+      ctx.fillStyle = burst;
       for (var p2 = 0; p2 < 900; p2++) {
         var ang = Math.random() * Math.PI * 2, rr = Math.pow(Math.random(), 2) * 100;
         ctx.beginPath(); ctx.arc(cx + Math.cos(ang) * rr, cy + Math.sin(ang) * rr, rr < 30 ? 1.4 : 0.8, 0, Math.PI * 2); ctx.fill();
