@@ -43,6 +43,8 @@
     --burst:       #5FC7AA;   /* light accent for the on-dark citation burst */
     --mark:        rgba(0, 122, 94, 0.20);  /* highlighter, now accent-tinted */
     --big-num:     rgba(0, 122, 94, 0.16);  /* massive recessive chapter numbers */
+    --grid:        rgba(0, 122, 94, 0.055);  /* blueprint grid — fine lines */
+    --grid-major:  rgba(0, 122, 94, 0.085);  /* blueprint grid — major lines */
 
     /* the ONE supporting accent — burnt orange / terracotta.
        Used ONLY for negatives: risks, friction, low confidence, attention.
@@ -85,6 +87,19 @@
     padding: var(--pad);
     box-shadow: 0 1px 2px rgba(35, 35, 29, 0.04), 0 24px 60px -28px rgba(35, 35, 29, 0.22);
     overflow: hidden;   /* keep bled section bands inside the rounded frame */
+  }
+  /* blueprint grid — a faint engineering-paper lattice across the whole sheet.
+     Fine 26px cells with a stronger major line every 5th, in the brand emerald.
+     Sits under the grain, over the section grounds; opacity kept low enough that
+     it reads as technical texture and never competes with the text. */
+  .sheet::before {
+    content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 4;
+    background-image:
+      linear-gradient(to right, var(--grid) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--grid) 1px, transparent 1px),
+      linear-gradient(to right, var(--grid-major) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--grid-major) 1px, transparent 1px);
+    background-size: 26px 26px, 26px 26px, 130px 130px, 130px 130px;
   }
   /* very subtle paper grain — sits over the sheet, never over text legibility */
   .sheet::after {
@@ -259,14 +274,18 @@
   /* risks: burnt-orange ⊖ on a soft coral chip — the ONE place negatives get colour */
   .itemlist.risk .sym { border-color: var(--warn-line); background: var(--warn-tint); }
   .itemlist.risk .sym::before { background: var(--warn); }
-  .diagram { display: grid; place-items: center; align-self: center; }
+  .diagram { display: flex; flex-direction: column; align-items: center; gap: 1.5rem; align-self: center; }
 
-  /* signal balance — computed from the strengths/risks lists flanking it,
-     plus the persona verdicts. A 3-second read of which way the evidence tilts. */
-  .balance { width: 210px; display: flex; flex-direction: column; gap: 0.85rem; }
+  /* persona strength vectors — a reinvented, data-driven take on the old 3-D
+     axes: one spoke per persona, verdict strength (0-10) plotted and joined
+     into a signal polygon. Dimensional, technical, and grounded in real data. */
+  .vectors { width: 100%; max-width: 220px; overflow: visible; }
+  /* signal balance — strengths vs risks count + split bar + panel mean.
+     Complements the vector plot: one reads per-persona, the other overall tilt. */
+  .balance { width: 100%; max-width: 210px; display: flex; flex-direction: column; gap: 0.7rem; }
   .bal-nums { display: flex; align-items: stretch; justify-content: center; gap: 1.2rem; }
   .bal-nums .bn { display: flex; flex-direction: column; align-items: center; gap: 0.3rem; }
-  .bal-nums .bn b { font-family: var(--sans); font-weight: 800; font-size: 2.5rem; line-height: 0.9; letter-spacing: -0.02em; }
+  .bal-nums .bn b { font-family: var(--sans); font-weight: 800; font-size: 2.3rem; line-height: 0.9; letter-spacing: -0.02em; }
   .bal-nums .bn.plus b { color: var(--accent); }
   .bal-nums .bn.minus b { color: var(--warn); }
   .bal-nums .bn span { font-family: var(--mono); font-size: 0.56rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
@@ -274,7 +293,7 @@
   .bal-bar { display: flex; height: 7px; border-radius: 4px; overflow: hidden; gap: 2px; }
   .bal-bar .p { background: var(--accent); }
   .bal-bar .m { background: var(--warn); }
-  .bal-mean { font-family: var(--mono); font-size: 0.6rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--label); text-align: center; }
+  .bal-mean { font-family: var(--mono); font-size: 0.58rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--label); text-align: center; }
   .bal-mean b { color: var(--accent); }
 
   /* editorial pull quote — a compact, positive reward closing 06: one standout
@@ -545,8 +564,10 @@
       <div class="gut"><div class="no">03</div><div class="nm">Strengths /<br>positives</div></div>
       <ul class="itemlist plus" id="strengths-list"></ul>
       <div class="diagram">
+        <svg id="vectors" class="vectors" viewBox="0 0 220 200" aria-hidden="true"></svg>
+        <div class="fig">Fig. 01 — Persona strength vectors</div>
         <div class="balance" id="balance"></div>
-        <div class="fig">Fig. 01 — Signal balance</div>
+        <div class="fig">Fig. 02 — Signal balance</div>
       </div>
       <div class="gut gut--warn"><div class="no">04</div><div class="nm">Risks /<br>friction points</div></div>
       <ul class="itemlist risk" id="risks-list"></ul>
@@ -600,7 +621,7 @@
           <div class="rec-cols" id="rec-cols"></div>
         </div>
       </div>
-      <div class="burst"><canvas id="burst" width="220" height="220" style="max-width:100%"></canvas><div class="fig">Fig. 02 — Citation density</div></div>
+      <div class="burst"><canvas id="burst" width="220" height="220" style="max-width:100%"></canvas><div class="fig">Fig. 03 — Citation density</div></div>
     </div>
   </section>
 
@@ -843,21 +864,49 @@
     // ---- questions ----
     $("qs-list").innerHTML = REPORT.questions.map(function (q) { return '<li><span class="qmark">?</span><span>' + esc(q) + '</span></li>'; }).join("");
 
-    // ---- signal balance (Fig. 01) — pure restatement of the lists beside it ----
+    // ---- persona strength vectors (Fig. 01) — a radial plot of the panel's
+    //      verdict strengths, one spoke per persona. Reinvents the old 3-D axes
+    //      with real data; nothing invented. ----
+    var vec = $("vectors");
+    if (vec) {
+      var ps = REPORT.personas || [];
+      var N = ps.length || 3, cx = 110, cy = 100, RAD = 60, MAX = 10;
+      var SHORT = { briefcase: "BUYER", code: "TECH", person: "USER" };
+      var ang = function (i) { return -Math.PI / 2 + i * 2 * Math.PI / N; };
+      var pt = function (i, r) { return [cx + Math.cos(ang(i)) * r, cy + Math.sin(ang(i)) * r]; };
+      var ring = function (f) {
+        return ps.map(function (_, i) { var p = pt(i, RAD * f); return (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1); }).join(" ") + " Z";
+      };
+      var s = "";
+      [0.25, 0.5, 0.75, 1].forEach(function (f) { s += '<path d="' + ring(f) + '" fill="none" stroke="var(--hair)" stroke-width="1"/>'; });
+      ps.forEach(function (_, i) { var p = pt(i, RAD); s += '<line x1="' + cx + '" y1="' + cy + '" x2="' + p[0].toFixed(1) + '" y2="' + p[1].toFixed(1) + '" stroke="var(--hair-2)" stroke-width="1"/>'; });
+      var poly = ps.map(function (p, i) { var q = pt(i, RAD * Math.max(0.06, (p.strength || 0) / MAX)); return (i ? "L" : "M") + q[0].toFixed(1) + " " + q[1].toFixed(1); }).join(" ") + " Z";
+      s += '<path d="' + poly + '" fill="var(--accent-tint)" stroke="var(--accent)" stroke-width="1.7" stroke-linejoin="round"/>';
+      ps.forEach(function (p, i) { var q = pt(i, RAD * Math.max(0.06, (p.strength || 0) / MAX)); s += '<circle cx="' + q[0].toFixed(1) + '" cy="' + q[1].toFixed(1) + '" r="2.7" fill="var(--accent)"/>'; });
+      s += '<circle cx="' + cx + '" cy="' + cy + '" r="1.6" fill="var(--ink)"/>';
+      ps.forEach(function (p, i) {
+        var lp = pt(i, RAD + 17), a = Math.abs(lp[0] - cx) < 8 ? "middle" : (lp[0] > cx ? "start" : "end");
+        var lbl = SHORT[p.role] || (p.name || "").split(" ")[0].toUpperCase();
+        s += '<text x="' + lp[0].toFixed(1) + '" y="' + lp[1].toFixed(1) + '" text-anchor="' + a + '" font-family="var(--mono)" font-size="6.5" letter-spacing="0.4" fill="var(--label)">' + esc(lbl) + '</text>';
+        s += '<text x="' + lp[0].toFixed(1) + '" y="' + (lp[1] + 8.5).toFixed(1) + '" text-anchor="' + a + '" font-family="var(--sans)" font-weight="800" font-size="8.5" fill="var(--accent)">' + (p.strength || 0).toFixed(1) + '</text>';
+      });
+      vec.innerHTML = s;
+    }
+
+    // ---- signal balance (Fig. 02) — strengths vs risks + panel mean ----
     var bal = $("balance");
     if (bal) {
-      var S = REPORT.strengths.length, R = REPORT.risks.length;
-      var mean = REPORT.personas.length
-        ? REPORT.personas.reduce(function (a, p) { return a + p.strength; }, 0) / REPORT.personas.length
-        : 0;
+      var nS = REPORT.strengths.length, nR = REPORT.risks.length;
+      var pm = (REPORT.personas || []).length
+        ? REPORT.personas.reduce(function (a, p) { return a + p.strength; }, 0) / REPORT.personas.length : 0;
       bal.innerHTML =
         '<div class="bal-nums">' +
-          '<span class="bn plus"><b class="tnum">' + S + '</b><span>strengths</span></span>' +
+          '<span class="bn plus"><b class="tnum">' + nS + '</b><span>strengths</span></span>' +
           '<span class="bal-sep"></span>' +
-          '<span class="bn minus"><b class="tnum">' + R + '</b><span>risks</span></span>' +
+          '<span class="bn minus"><b class="tnum">' + nR + '</b><span>risks</span></span>' +
         '</div>' +
-        '<div class="bal-bar"><i class="p" style="flex:' + S + '"></i><i class="m" style="flex:' + R + '"></i></div>' +
-        '<div class="bal-mean">Persona verdict mean · <b class="tnum">' + mean.toFixed(1) + '</b> / 10</div>';
+        '<div class="bal-bar"><i class="p" style="flex:' + nS + '"></i><i class="m" style="flex:' + nR + '"></i></div>' +
+        '<div class="bal-mean">Panel verdict mean · <b class="tnum">' + pm.toFixed(1) + '</b> / 10</div>';
     }
 
     // ---- pull quote — elevate one standout STRENGTH already listed in 03,
