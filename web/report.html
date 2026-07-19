@@ -248,6 +248,32 @@
   .itemlist.risk .sym::before { background: var(--warn); }
   .diagram { display: grid; place-items: center; align-self: center; }
 
+  /* signal balance — computed from the strengths/risks lists flanking it,
+     plus the persona verdicts. A 3-second read of which way the evidence tilts. */
+  .balance { width: 210px; display: flex; flex-direction: column; gap: 0.85rem; }
+  .bal-nums { display: flex; align-items: stretch; justify-content: center; gap: 1.2rem; }
+  .bal-nums .bn { display: flex; flex-direction: column; align-items: center; gap: 0.3rem; }
+  .bal-nums .bn b { font-family: var(--sans); font-weight: 800; font-size: 2.5rem; line-height: 0.9; letter-spacing: -0.02em; }
+  .bal-nums .bn.plus b { color: var(--accent); }
+  .bal-nums .bn.minus b { color: var(--warn); }
+  .bal-nums .bn span { font-family: var(--mono); font-size: 0.56rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+  .bal-sep { width: 1px; background: var(--hair); }
+  .bal-bar { display: flex; height: 7px; border-radius: 4px; overflow: hidden; gap: 2px; }
+  .bal-bar .p { background: var(--accent); }
+  .bal-bar .m { background: var(--warn); }
+  .bal-mean { font-family: var(--mono); font-size: 0.6rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--label); text-align: center; }
+  .bal-mean b { color: var(--accent); }
+
+  /* AI margin note — an editorial breathing moment between 05/06 and the
+     verdict. The quote is lifted VERBATIM from the findings above (never
+     invented); warn styling ties it to the attention register. */
+  .ainote { margin-top: 1.8rem; padding: 1.1rem 1.3rem; background: var(--warn-pale); border: 1px solid var(--warn-line); border-left: 3px solid var(--warn); border-radius: 3px; display: grid; grid-template-columns: 30px 1fr; gap: 0.9rem; align-items: start; }
+  .ainote .ai-ic { width: 26px; height: 26px; border-radius: 50%; background: var(--warn); display: grid; place-items: center; margin-top: 0.2rem; }
+  .ainote .ai-ic svg { width: 14px; height: 14px; stroke: #fff; stroke-width: 1.6; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .ainote .ai-lbl { font-family: var(--mono); font-size: 0.6rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--warn); font-weight: 700; margin-bottom: 0.45rem; }
+  .ainote .ai-q { font-family: var(--sans); font-size: 1.18rem; font-weight: 600; line-height: 1.5; color: var(--ink); max-width: 62ch; text-wrap: balance; }
+  .ainote .ai-att { font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-top: 0.55rem; }
+
   .iq-grid { display: grid; grid-template-columns: 128px 1fr 128px 1fr; gap: 1.2rem; align-items: start; }
   .imp { list-style: none; margin: 0; padding: 0; }
   .imp li { display: grid; grid-template-columns: 22px 1fr auto auto; gap: 0.8rem; align-items: center; padding: 0.75rem 0; border-bottom: 1px solid var(--hair-3); }
@@ -495,15 +521,8 @@
       <div class="gut"><div class="no">03</div><div class="nm">Strengths /<br>positives</div></div>
       <ul class="itemlist plus" id="strengths-list"></ul>
       <div class="diagram">
-        <svg width="200" height="180" viewBox="0 0 200 180" fill="none" stroke="var(--hair-2)" stroke-width="1">
-          <path d="M20 120 L100 150 L180 120 L100 96 Z"/>
-          <path d="M40 111 L100 133 M60 103 L100 118 M140 111 L100 133 M120 103 L100 118"/>
-          <path d="M20 120 L100 96 M180 120 L100 96" stroke="var(--hair-3)"/>
-          <g stroke="var(--ink)" stroke-width="1.6"><path d="M100 120 L100 30"/><path d="M97 38 L100 28 L103 38"/></g>
-          <g stroke="var(--ink-2)" stroke-width="1.4"><path d="M100 120 L36 96"/><path d="M43 91 L33 95 L40 101"/><path d="M100 120 L164 96"/><path d="M157 91 L167 95 L160 101"/></g>
-          <circle cx="100" cy="120" r="2.4" fill="var(--ink)" stroke="none"/>
-        </svg>
-        <div class="fig">Fig. 01 — Strength vectors</div>
+        <div class="balance" id="balance"></div>
+        <div class="fig">Fig. 01 — Signal balance</div>
       </div>
       <div class="gut gut--warn"><div class="no">04</div><div class="nm">Risks /<br>friction points</div></div>
       <ul class="itemlist risk" id="risks-list"></ul>
@@ -517,6 +536,14 @@
       <ul class="imp" id="imp-list"></ul>
       <div class="gut"><div class="no">06</div><div class="nm">Unanswered<br>questions</div></div>
       <ul class="qs" id="qs-list"></ul>
+    </div>
+    <div class="ainote" id="ainote" hidden>
+      <span class="ai-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z"/></svg></span>
+      <div>
+        <div class="ai-lbl">FIE · Margin note</div>
+        <div class="ai-q" id="ainote-q"></div>
+        <div class="ai-att">Verbatim friction signal — cited in section 04</div>
+      </div>
     </div>
   </section>
 
@@ -765,6 +792,33 @@
 
     // ---- questions ----
     $("qs-list").innerHTML = REPORT.questions.map(function (q) { return '<li><span class="qmark">?</span><span>' + esc(q) + '</span></li>'; }).join("");
+
+    // ---- signal balance (Fig. 01) — pure restatement of the lists beside it ----
+    var bal = $("balance");
+    if (bal) {
+      var S = REPORT.strengths.length, R = REPORT.risks.length;
+      var mean = REPORT.personas.length
+        ? REPORT.personas.reduce(function (a, p) { return a + p.strength; }, 0) / REPORT.personas.length
+        : 0;
+      bal.innerHTML =
+        '<div class="bal-nums">' +
+          '<span class="bn plus"><b class="tnum">' + S + '</b><span>strengths</span></span>' +
+          '<span class="bal-sep"></span>' +
+          '<span class="bn minus"><b class="tnum">' + R + '</b><span>risks</span></span>' +
+        '</div>' +
+        '<div class="bal-bar"><i class="p" style="flex:' + S + '"></i><i class="m" style="flex:' + R + '"></i></div>' +
+        '<div class="bal-mean">Persona verdict mean · <b class="tnum">' + mean.toFixed(1) + '</b> / 10</div>';
+    }
+
+    // ---- AI margin note — elevate one risk ALREADY shown in section 04.
+    //      Selection is mechanical (shortest claim in pull-quote range), so the
+    //      note never editorializes beyond what the report itself says. ----
+    var note = $("ainote");
+    if (note) {
+      var pool = (REPORT.risks || []).filter(function (r) { return r.length >= 40 && r.length <= 220; });
+      var q = pool.sort(function (a, b) { return a.length - b.length; })[0] || (REPORT.risks || [])[0] || "";
+      if (q) { $("ainote-q").textContent = "“" + q + "”"; note.hidden = false; }
+    }
 
     // ---- verdict ----
     $("verdict-h").innerHTML = esc(REPORT.verdict.line1) + "<br>" + esc(REPORT.verdict.line2);
