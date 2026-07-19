@@ -28,3 +28,6 @@ __pycache__/
 .claude/
 .mcp.json
 CLAUDE.md
+
+# netlify deploy cache
+.netlify/
