@@ -64,7 +64,10 @@ quote or paraphrase of what the site actually says), and the source_url where \
 you saw it. An observation with no supporting evidence must be omitted.
 
 - friction_points: describe the experience gap observationally (unclear/missing/\
-hard-to-find), never as criticism. Do NOT list normal troubleshooting docs.
+hard-to-find), never as criticism. Do NOT list normal troubleshooting docs. \
+Be date-aware — today's date is given at the top of this prompt; NEVER flag a \
+copyright year, "©" line, or any date as a "placeholder" or "future-dated" when \
+it matches the current year (a current-year copyright is normal and expected).
 - standout_strengths: what the site does genuinely well — say it warmly.
 - unanswered_questions: concrete things a prospective visitor CANNOT learn from \
 the public site before signing up.

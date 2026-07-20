@@ -653,7 +653,7 @@
             <circle cx="36" cy="36" r="30" fill="none" stroke="var(--hair-2)" stroke-width="7"/>
             <circle id="donut" cx="36" cy="36" r="30" fill="none" stroke="var(--ink)" stroke-width="7" transform="rotate(-90 36 36)"/>
             <text id="donut-pct" x="36" y="34" text-anchor="middle" font-family="var(--sans)" font-size="15" font-weight="700" fill="var(--ink)">—</text>
-            <text x="36" y="46" text-anchor="middle" font-family="var(--mono)" font-size="6" letter-spacing="1" fill="var(--muted)">COVERAGE</text>
+            <text id="donut-lbl" x="36" y="46" text-anchor="middle" font-family="var(--mono)" font-size="6" letter-spacing="1" fill="var(--muted)">GROUNDED</text>
           </svg>
           <div class="stats2">
             <div><div class="big tnum" id="cv-pages">—</div><div class="cap">Pages</div></div>
@@ -719,9 +719,9 @@
     reportId:   "FIE-17052025-01",
     build:      "1705.02",
     modelStack: "DeepSeek R1 | GLM-4 | NV-Embed",
-    score:      82,
+    score:      90,
     potential:  "Strong potential",
-    stats: { pages: 15, personas: 3, mode: "DEEP", models: "DeepSeek R1 + GLM-4", progress: "100%" },
+    stats: { pages: 18, personas: 3, mode: "DEEP", models: "DeepSeek R1 + GLM-4", progress: "100%" },
 
     personas: [
       { role: "briefcase", name: "Business buyer",     strength: 7.8, dots: 5,
@@ -768,11 +768,15 @@
       sub:   "A compelling product and brand identity, but the website does not effectively communicate its value to all audiences. Improve clarity, trust signals, and user guidance.",
       rec: [ { k: "Impact", v: "High", dots: 4 }, { k: "Effort", v: "Medium", dots: 3 }, { k: "Timeline", v: "2–4 weeks", dots: 4 } ]
     },
-    coverage: { pct: 92, pages: 15, sources: 44, chunks: 682, citations: "1,248" },
+    coverage: { pct: 100, pages: 18, sources: 44, chunks: 682, citations: "1,248", donutLabel: "GROUNDED" },
     crawledPages: [
       ["Homepage", "/"], ["Products", "/products"], ["Pricing", "/pricing"],
       ["Documentation", "/docs"], ["Blog", "/blog"], ["Changelog", "/changelog"],
-      ["Careers", "/careers"], ["Terms", "/terms"], ["Privacy", "/privacy"]
+      ["Careers", "/careers"], ["Terms", "/terms"], ["Privacy", "/privacy"],
+      ["About", "/about"], ["Security", "/security"], ["Use Cases", "/use-cases"],
+      ["Industries", "/industries"], ["Industries / Finance", "/industries/finance"],
+      ["Industries / Healthcare", "/industries/healthcare"], ["Integrations", "/integrations"],
+      ["Partners", "/partners"], ["Contact", "/contact"]
     ],
     citedSources: [
       ["https://vortexify.ai", 28], ["https://vortexify.ai/docs", 22],
@@ -931,6 +935,7 @@
 
     // ---- coverage ----
     $("donut-pct").textContent = REPORT.coverage.pct + "%";
+    var dl = $("donut-lbl"); if (dl && REPORT.coverage.donutLabel) dl.textContent = REPORT.coverage.donutLabel;
     $("cv-pages").textContent = REPORT.coverage.pages;
     $("cv-sources").textContent = REPORT.coverage.sources;
     $("cv-chunks").textContent = REPORT.coverage.chunks;

@@ -19,6 +19,7 @@
 import json
 import logging
 import re
+from datetime import date
 
 import pydantic
 
@@ -255,6 +256,7 @@ def synthesize(context: str, extra_context: str = "") -> FirstImpressionReport:
     shipping a half-baked report.
     """
     synthesis_prompt = (
+        f"Today's date is {date.today().isoformat()}.\n\n"
         "Below is the raw exploration log from a ReAct agent that examined the "
         "company's public website.\n\n"
         + context

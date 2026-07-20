@@ -73,7 +73,7 @@ def main() -> None:
 
     # Windows ships npx as npx.cmd; subprocess (no shell) needs the resolved path.
     npx = shutil.which("npx") or shutil.which("npx.cmd") or "npx"
-    print("Deploying report pages → Netlify ...", flush=True)
+    print("Deploying report pages -> Netlify ...", flush=True)
     proc = subprocess.run(
         [npx, "--yes", "netlify-cli", "deploy", "--prod", "--dir", str(stage),
          "--auth", token, "--site", site],

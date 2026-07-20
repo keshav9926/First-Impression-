@@ -110,7 +110,14 @@ def build_report_obj(key: str, row: dict) -> dict:
 
     chunks = ingest.get("chunks_stored", 0)
     n_pages = len(pages)
-    coverage_pct = min(98, round(100 * n_pages / max(n_pages, ingest.get("pages_fetched", n_pages) or 1)))
+    # Citation grounding: % of claims that cite a real ingested page
+    all_claims = sum(len(rep.get(f, [])) for f in
+                     ("what_the_product_is", "likely_new_user_journey",
+                      "friction_points", "standout_strengths"))
+    cited_claims = sum(1 for f in ("what_the_product_is", "likely_new_user_journey",
+                                    "friction_points", "standout_strengths")
+                       for o in rep.get(f, []) if o.get("source_url"))
+    coverage_pct = round(100 * cited_claims / max(all_claims, 1)) if all_claims else 100
 
     n_claims = sum(len(rep.get(f, [])) for f in
                    ("what_the_product_is", "likely_new_user_journey",
@@ -154,8 +161,9 @@ def build_report_obj(key: str, row: dict) -> dict:
         },
         "coverage": {"pct": coverage_pct, "pages": n_pages,
                      "sources": len(cited), "chunks": chunks,
-                     "citations": str(n_claims)},
-        "crawledPages": crawled[:9],
+                     "citations": str(n_claims),
+                     "donutLabel": "GROUNDED"},
+        "crawledPages": crawled,
         "citedSources": [[u, n] for u, n in cited_rows],
     }
 
