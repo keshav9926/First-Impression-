@@ -136,12 +136,12 @@ def build_report_obj(key: str, row: dict) -> dict:
         "generated": gen,
         "reportId": f"FIE-{datetime.now().strftime('%d%m%Y')}-{key[:4].upper()}",
         "build": datetime.now().strftime("%d%m.%y"),
-        "modelStack": "GLM-5.2 | DeepSeek-V4 | Nemotron | NV-Embed",
+        "modelStack": "DeepSeek-V4-Pro | DeepSeek-V4-Flash | Nemotron | NV-Embed",
         "score": score,
         "potential": potential,
         "stats": {"pages": n_pages, "personas": len(personas) or 3,
                   "mode": row.get("mode", "deep").upper(),
-                  "models": "GLM-5.2 (deep)", "progress": "100%"},
+                  "models": "DeepSeek-V4-Pro (deep)", "progress": "100%"},
         "personas": personas,
         "execSummary": " ".join(
             _claims(rep.get("what_the_product_is", []), 1)
