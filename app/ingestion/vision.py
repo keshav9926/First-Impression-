@@ -17,6 +17,7 @@
 import base64
 import io
 import logging
+import time
 
 import httpx
 
@@ -66,6 +67,47 @@ def _jpeg_data_url(raw: bytes) -> str | None:
     return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
+# Transient signals worth a backoff-retry / failover to the next model, rather
+# than a silent skip. The 503 "resource exhausted / worker local limit" storm is
+# exactly this — a momentary concurrency cap, not a permanent failure.
+_TRANSIENT = ("503", "504", "429", "resourceexhausted", "timeout",
+              "temporarily", "overloaded", "service unavailable")
+_FAILED = object()  # sentinel: this model errored out — try the next one
+
+
+def _is_transient(exc: Exception) -> bool:
+    s = str(exc).lower()
+    return any(t in s for t in _TRANSIENT)
+
+
+def _try_model(client, model: str, data_url: str):
+    """Caption `data_url` with ONE model, retrying transient errors with backoff.
+    Returns the caption str, None (valid 'non-product' answer), or _FAILED (the
+    model errored past its retries → caller should fail over to the next model)."""
+    for attempt in range(settings.vision_retries_per_model):
+        try:
+            resp = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": [
+                    {"type": "text", "text": _PROMPT},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ]}],
+                max_tokens=180,
+                temperature=0.0,
+            )
+            cap = (resp.choices[0].message.content or "").strip()
+            if not cap or "non-product image" in cap.lower():
+                return None  # a valid answer: nothing worth surfacing
+            return cap[:_CAPTION_CHARS]
+        except Exception as exc:
+            if _is_transient(exc) and attempt < settings.vision_retries_per_model - 1:
+                time.sleep(1.5 * (attempt + 1))  # 1.5s, 3s, ... backoff
+                continue
+            logger.info("vision: %s failed (%s) — failing over", model, type(exc).__name__)
+            return _FAILED
+    return _FAILED
+
+
 def _caption_one(client, http: httpx.Client, url: str) -> str | None:
     try:
         raw = http.get(url).content
@@ -75,23 +117,16 @@ def _caption_one(client, http: httpx.Client, url: str) -> str | None:
     data_url = _jpeg_data_url(raw)
     if not data_url:
         return None
-    try:
-        resp = client.chat.completions.create(
-            model=settings.vision_model,
-            messages=[{"role": "user", "content": [
-                {"type": "text", "text": _PROMPT},
-                {"type": "image_url", "image_url": {"url": data_url}},
-            ]}],
-            max_tokens=180,
-            temperature=0.0,
-        )
-    except Exception as exc:
-        logger.info("vision: caption failed %s (%s)", url, type(exc).__name__)
-        return None
-    cap = (resp.choices[0].message.content or "").strip()
-    if not cap or "non-product image" in cap.lower():
-        return None  # nothing worth surfacing
-    return cap[:_CAPTION_CHARS]
+    # Try each vision model in turn; a transient/hard model error fails over to
+    # the next (different worker = different concurrency pool). Only a real
+    # caption or a definitive 'non-product' verdict stops the chain.
+    for model in settings.vision_models:
+        result = _try_model(client, model, data_url)
+        if result is _FAILED:
+            continue
+        return result  # caption str, or None for a non-product image
+    logger.info("vision: all models failed for %s", url)
+    return None
 
 
 def caption_pages(pages) -> dict[str, list[str]]:

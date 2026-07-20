@@ -487,11 +487,12 @@ def crawl(start_url: str, max_pages: int) -> CrawlResult:
     #   - too few pages: link discovery found almost nothing, which on an SPA
     #     means the nav is JS-injected and a static fetch can't see it (this is
     #     why collectwise analyzed only 1 real page). Rendering finds those links.
-    if not result.thin_extraction and len(result.pages) >= _MIN_STATIC_PAGES:
+    if not settings.force_render and not result.thin_extraction and len(result.pages) >= _MIN_STATIC_PAGES:
         return result
 
-    reason = "thin static extraction" if result.thin_extraction else (
-        f"only {len(result.pages)} page(s) found (JS-injected nav?)")
+    reason = ("force_render enabled" if settings.force_render else
+              "thin static extraction" if result.thin_extraction else
+              f"only {len(result.pages)} page(s) found (JS-injected nav?)")
     logger.info("%s (%s) — escalating to headless render", reason, start_url)
     events.emit("render.escalate", url=start_url)
     try:

@@ -104,8 +104,24 @@ class Settings(BaseSettings):
     # "no product screenshots" / "can't tell what the UI does" findings.
     vision_enabled: bool = True
     vision_model: str = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
-    vision_max_images_per_page: int = 4
-    vision_max_images_total: int = 12  # hard cost cap per ingest (~2s each)
+    # Quality-first (2026-07-20): the pipeline runs on-demand per company, so
+    # thoroughness beats cost. Caps raised so EVERY product screenshot on a page
+    # gets read, not a sample. Lower these again if a batch/free-tier run needs
+    # a budget.
+    vision_max_images_per_page: int = 40
+    vision_max_images_total: int = 200  # ~2s each; effectively "read them all"
+    # Vision FAILOVER chain (image→text), mirroring the LLM pool. The 503
+    # "Worker local total request limit reached (16/16)" is a PER-WORKER
+    # concurrency cap — each VLM is a separate NVIDIA deployment, so when omni
+    # is saturated the next model's worker usually isn't. Tried in order per
+    # image (with short backoff-retries first); first successful caption wins.
+    # omni-30b leads (bake-off winner); the two llama VLMs are the safety net.
+    vision_models: list[str] = [
+        "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+        "meta/llama-3.2-90b-vision-instruct",
+        "nvidia/llama-3.1-nemotron-nano-vl-8b-v1",
+    ]
+    vision_retries_per_model: int = 3  # backoff-retries on transient 503/504/429
 
     # Two report pipelines (2026-07-19 bake-off). "→" = failover: try the next
     # model if one errors OR produces no valid report.
@@ -137,7 +153,11 @@ class Settings(BaseSettings):
     # so multi-page sites are actually explored rather than the agent running out
     # of steps and reporting "not found" for pages it never reached. RE-BENCHMARK
     # latency if you push this higher; revert to 5 if GLM per-step time hurts.
-    agent_max_steps: int = 7
+    # Quality-first (2026-07-20): raised 7 → 40 so the agent can actually READ
+    # every page of a larger site and run many targeted searches/questions,
+    # rather than running out of steps and reporting "not found" for pages it
+    # never reached. The only cost is latency (on-demand runs, time is fine).
+    agent_max_steps: int = 40
 
     # Phase 5: one extra Gemini call per report that fact-checks every claim
     # against its cited page's stored text; unsupported claims are dropped.
@@ -216,7 +236,14 @@ class Settings(BaseSettings):
     # Honest User-Agent so site owners can identify and block us if they wish.
     crawler_user_agent: str = "FirstImpressionBot/0.1 (learning project; respects robots.txt)"
     request_delay_seconds: float = 1.0  # pause between requests — never hammer a site
-    max_pages_hard_limit: int = 50
+    max_pages_hard_limit: int = 300
+
+    # Quality-first (2026-07-20): always do the headless-render pass, don't wait
+    # for the static crawl to look "thin". JS-heavy sites (Vortexify, Framer,
+    # SPAs) only expose their real nav AND their product screenshots after
+    # render — forcing it means we crawl every page and the vision captioner
+    # actually sees the dashboards. Set False to revert to cheap static-first.
+    force_render: bool = True
 
 
 # One shared instance, imported by the rest of the app.

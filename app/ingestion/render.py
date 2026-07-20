@@ -68,6 +68,24 @@ def render_page(browser, url: str) -> tuple[str, str]:
             page.wait_for_load_state("networkidle", timeout=_IDLE_SETTLE_MS)
         except Exception:
             pass  # never idle → take the DOM we have; better than nothing
+        # Scroll top-to-bottom to trigger lazy-loaded images/dashboards (many
+        # product sites defer screenshots until they scroll into view). Without
+        # this the vision captioner never sees them. Best-effort; never fatal.
+        try:
+            page.evaluate("""async () => {
+              await new Promise(res => {
+                let y = 0;
+                const step = () => {
+                  window.scrollTo(0, y); y += Math.round(window.innerHeight * 0.9);
+                  if (y < document.body.scrollHeight) setTimeout(step, 140);
+                  else { window.scrollTo(0, 0); setTimeout(res, 500); }
+                };
+                step();
+              });
+            }""")
+            page.wait_for_timeout(600)  # let freshly-triggered images finish loading
+        except Exception:
+            pass
         return page.content(), page.inner_text("body")
     except Exception as exc:
         logger.warning("render failed for %s: %s", url, exc)

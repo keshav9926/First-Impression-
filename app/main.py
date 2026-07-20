@@ -127,6 +127,8 @@ def _ingest_site(url: str, max_pages: int) -> IngestResponse:
     # exists. Fail-open + capped; {} when disabled/unconfigured.
     events.emit("phase", name="vision")
     captions_by_page = vision.caption_pages(result.pages)
+    images_seen = sum(len(getattr(p, "image_urls", []) or []) for p in result.pages)
+    images_captioned = sum(len(v) for v in captions_by_page.values())
 
     # Each chunk carries: url (citations), headings (read_page section map),
     # ctas (signup/demo actions), images (visual evidence: alt/filename labels +
@@ -162,6 +164,8 @@ def _ingest_site(url: str, max_pages: int) -> IngestResponse:
         skipped_by_robots=result.skipped_by_robots,
         extraction_warning=result.thin_extraction,
         injection_lines_removed=injection_lines_removed,
+        images_seen=images_seen,
+        images_captioned=images_captioned,
     )
     events.emit("ingest.done", **summary.model_dump())
     return summary

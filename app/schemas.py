@@ -24,7 +24,7 @@ class IngestRequest(BaseModel):
     """
 
     url: HttpUrl  # HttpUrl (not str) = must parse as a valid http(s) URL
-    max_pages: int = Field(default=15, ge=1, le=50)  # ge/le = min/max allowed
+    max_pages: int = Field(default=15, ge=1, le=300)  # ge/le = min/max allowed
 
 
 class IngestResponse(BaseModel):
@@ -45,6 +45,11 @@ class IngestResponse(BaseModel):
     # Lines stripped by the prompt-injection guard (sanitize.py) — nonzero
     # means the site contained instruction-shaped text aimed at the LLM.
     injection_lines_removed: int = 0
+    # Vision (Phase 9) visibility: how many product images were found across the
+    # crawl and how many the vision model actually captioned. Both 0 means either
+    # vision is off/unconfigured or the pages carried no product imagery.
+    images_seen: int = 0
+    images_captioned: int = 0
 
 
 class AskRequest(BaseModel):

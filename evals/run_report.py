@@ -17,7 +17,7 @@ from app.main import _ingest_site
 OUT_DIR = Path(__file__).resolve().parent.parent / "reports"
 
 
-def run(name: str, url: str, mode: str = "normal", max_pages: int = 8) -> None:
+def run(name: str, url: str, mode: str = "normal", max_pages: int = 100) -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     print(f"\n[{mode}] ===== {name} ({url}) =====", flush=True)
     row = {"company": name, "url": url, "mode": mode}
@@ -50,5 +50,5 @@ if __name__ == "__main__":
         raise SystemExit("usage: python -m evals.run_report <name> <url> [normal|deep] [max_pages]")
     name, url = sys.argv[1], sys.argv[2]
     mode = sys.argv[3] if len(sys.argv) > 3 else "normal"
-    max_pages = int(sys.argv[4]) if len(sys.argv) > 4 else 8
+    max_pages = int(sys.argv[4]) if len(sys.argv) > 4 else 100
     run(name, url, mode, max_pages)
