@@ -58,6 +58,15 @@
     --sans: "Helvetica Neue", "Arial Nova", Arial, "Liberation Sans", sans-serif;
     --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, "Liberation Mono", Menlo, monospace;
     --fs: 12.5px;
+
+    /* adaptive SVG vector plot variables */
+    --vec-grid: var(--hair);
+    --vec-axis: var(--hair-2);
+    --vec-poly-fill: var(--accent-tint);
+    --vec-poly-stroke: var(--accent);
+    --vec-center-dot: var(--ink);
+    --vec-lbl-fill: var(--label);
+    --vec-val-fill: var(--accent);
   }
 
   * { box-sizing: border-box; }
@@ -232,14 +241,15 @@
      padding-inline restores the content inset so every column stays aligned. */
   .band { margin-inline: calc(-1 * var(--pad)); padding-inline: var(--pad); }
   /* rhythm:  grey → pale-teal → paper → mint → dark → pale-teal → neutral  */
-  .sec--personas { background: var(--gray); }       /* 01 neutral warm grey */
-  .sec--exec     { background: var(--teal-pale); }  /* 02 very pale teal     */
-  .sec--imp      { background: var(--mint); }       /* 05 soft mint          */
-  .sec--q        { background: var(--gray); }       /* 06 warm grey          */
-  .sec--pipe     { background: var(--pipe-bg); }    /* 08 pale teal          */
-  .sec--evidence { background: var(--neutral); }    /* 09 clean analytical   */
-  .sec--verdict  { background: var(--accent-deep); border-top-color: transparent; padding-block: 3rem; }  /* 07 dark teal — the climax gets extra air */
-  /* 03·04 strengths + risks stay on bare paper — the quiet minimal spread */
+  .sec--personas  { background: var(--gray); }       /* 01 neutral warm grey */
+  .sec--exec      { background: var(--teal-pale); }  /* 02 very pale teal     */
+  .sec--strengths { background: var(--accent-deep); border-top-color: transparent; padding-block: 3rem; } /* 03 dark teal strengths */
+  .sec--imp       { background: var(--mint); }       /* 05 soft mint          */
+  .sec--q         { background: var(--gray); }       /* 06 warm grey          */
+  .sec--pipe      { background: var(--pipe-bg); }    /* 08 pale teal          */
+  .sec--evidence  { background: var(--neutral); }    /* 09 clean analytical   */
+  .sec--verdict   { background: var(--accent-deep); border-top-color: transparent; padding-block: 3rem; }  /* 07 dark teal — the climax gets extra air */
+  /* 04 risks stay on bare paper — the quiet minimal spread */
 
   .persona-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: clamp(1rem, 3vw, 2.4rem); }
   .persona .phead { display: flex; align-items: center; gap: 0.6rem; }
@@ -264,7 +274,29 @@
   /* muted to a faint texture so it reads as intentional grain, never as placeholder filler competing with the summary */
   .plusgrid { font-family: var(--mono); color: var(--muted); opacity: 0.4; font-size: 0.9rem; line-height: 1.55; letter-spacing: 0.42em; text-align: right; white-space: pre; align-self: stretch; }
 
-  .sr-grid { display: grid; grid-template-columns: 128px 1fr 220px 128px 1fr; gap: 1.2rem; align-items: start; }
+  .sr-grid-single { display: grid; grid-template-columns: 128px 1fr 220px; gap: clamp(1rem, 3vw, 2.2rem); align-items: start; }
+
+  /* ---------- SECTION 03 (STRENGTHS - DEEP SLATE NAVY BAND) ---------- */
+  .sec--strengths { 
+    background: #65adff; 
+    border-top-color: transparent;
+    padding-block: 3rem;
+    --vec-grid: rgba(255, 255, 255, 0.12);
+    --vec-axis: rgba(255, 255, 255, 0.25);
+    --vec-poly-fill: rgba(95, 199, 202, 0.15); /* glowing bright teal/cyan */
+    --vec-poly-stroke: #5FC7C9; /* glowing bright teal/cyan */
+    --vec-center-dot: #fff;
+    --vec-lbl-fill: rgba(255, 255, 255, 0.7);
+    --vec-val-fill: #5FC7C9;
+  }
+  .sec--strengths .gut .no { color: rgba(255, 255, 255, 0.22); }
+  .sec--strengths .gut .nm { color: rgba(255, 255, 255, 0.6); }
+  .sec--strengths .itemlist.plus li { color: rgba(255, 255, 255, 0.85); }
+  .sec--strengths .itemlist.plus .sym { border-color: rgba(95, 199, 202, 0.5); background: rgba(95, 199, 202, 0.12); }
+  .sec--strengths .itemlist.plus .sym::before,
+  .sec--strengths .itemlist.plus .sym::after { background: #5FC7C9; }
+  .sec--strengths .fig { color: rgba(255, 255, 255, 0.5); }
+  .sec--verdict .wm { color: #fff; opacity: 0.045; }
   .itemlist { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.95rem; }
   .itemlist li { display: grid; grid-template-columns: 20px 1fr; gap: 0.6rem; align-items: start; font-family: var(--sans); font-size: 0.92rem; line-height: 1.5; color: var(--ink-2); }
   .itemlist .sym { position: relative; width: 16px; height: 16px; border-radius: 50%; border: 1.4px solid var(--muted); display: grid; place-items: center; margin-top: 0.12rem; }
@@ -422,8 +454,8 @@
     .about-grid { grid-template-columns: 1fr; }
     .stats { grid-template-columns: repeat(3, 1fr); }
     .scorebox { grid-column: 1 / -1; }
-    .sr-grid { grid-template-columns: 1fr 1fr; }
-    .sr-grid .diagram { grid-column: 1 / -1; order: 9; }
+    .sr-grid-single { grid-template-columns: 1fr; }
+    .sr-grid-single .diagram { order: 9; }
     .imp, .qs { grid-template-columns: 1fr; }
     .exec-grid, .verdict-grid, .ev-grid { grid-template-columns: 1fr; }
     .persona-row { grid-template-columns: 1fr; }
@@ -560,19 +592,27 @@
     </div>
   </section>
 
-  <!-- ============ 03 / 04 STRENGTHS + RISKS ============ -->
-  <section class="sec reveal">
-    <div class="sr-grid">
+  <!-- ============ 03 STRENGTHS ============ -->
+  <section class="sec band sec--strengths reveal">
+    <div class="sr-grid-single">
       <div class="gut"><div class="no">03</div><div class="nm">Strengths /<br>positives</div></div>
       <ul class="itemlist plus" id="strengths-list"></ul>
       <div class="diagram">
         <svg id="vectors" class="vectors" viewBox="0 0 220 200" aria-hidden="true"></svg>
         <div class="fig">Fig. 01 — Persona strength vectors</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 04 RISKS ============ -->
+  <section class="sec reveal">
+    <div class="sr-grid-single">
+      <div class="gut gut--warn"><div class="no">04</div><div class="nm">Risks /<br>friction points</div></div>
+      <ul class="itemlist risk" id="risks-list"></ul>
+      <div class="diagram">
         <div class="balance" id="balance"></div>
         <div class="fig">Fig. 02 — Signal balance</div>
       </div>
-      <div class="gut gut--warn"><div class="no">04</div><div class="nm">Risks /<br>friction points</div></div>
-      <ul class="itemlist risk" id="risks-list"></ul>
     </div>
   </section>
 
@@ -884,17 +924,17 @@
         return ps.map(function (_, i) { var p = pt(i, RAD * f); return (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1); }).join(" ") + " Z";
       };
       var s = "";
-      [0.25, 0.5, 0.75, 1].forEach(function (f) { s += '<path d="' + ring(f) + '" fill="none" stroke="var(--hair)" stroke-width="1"/>'; });
-      ps.forEach(function (_, i) { var p = pt(i, RAD); s += '<line x1="' + cx + '" y1="' + cy + '" x2="' + p[0].toFixed(1) + '" y2="' + p[1].toFixed(1) + '" stroke="var(--hair-2)" stroke-width="1"/>'; });
+      [0.25, 0.5, 0.75, 1].forEach(function (f) { s += '<path d="' + ring(f) + '" fill="none" stroke="var(--vec-grid)" stroke-width="1"/>'; });
+      ps.forEach(function (_, i) { var p = pt(i, RAD); s += '<line x1="' + cx + '" y1="' + cy + '" x2="' + p[0].toFixed(1) + '" y2="' + p[1].toFixed(1) + '" stroke="var(--vec-axis)" stroke-width="1"/>'; });
       var poly = ps.map(function (p, i) { var q = pt(i, RAD * Math.max(0.06, (p.strength || 0) / MAX)); return (i ? "L" : "M") + q[0].toFixed(1) + " " + q[1].toFixed(1); }).join(" ") + " Z";
-      s += '<path d="' + poly + '" fill="var(--accent-tint)" stroke="var(--accent)" stroke-width="1.7" stroke-linejoin="round"/>';
-      ps.forEach(function (p, i) { var q = pt(i, RAD * Math.max(0.06, (p.strength || 0) / MAX)); s += '<circle cx="' + q[0].toFixed(1) + '" cy="' + q[1].toFixed(1) + '" r="2.7" fill="var(--accent)"/>'; });
-      s += '<circle cx="' + cx + '" cy="' + cy + '" r="1.6" fill="var(--ink)"/>';
+      s += '<path d="' + poly + '" fill="var(--vec-poly-fill)" stroke="var(--vec-poly-stroke)" stroke-width="1.7" stroke-linejoin="round"/>';
+      ps.forEach(function (p, i) { var q = pt(i, RAD * Math.max(0.06, (p.strength || 0) / MAX)); s += '<circle cx="' + q[0].toFixed(1) + '" cy="' + q[1].toFixed(1) + '" r="2.7" fill="var(--vec-poly-stroke)"/>'; });
+      s += '<circle cx="' + cx + '" cy="' + cy + '" r="1.6" fill="var(--vec-center-dot)"/>';
       ps.forEach(function (p, i) {
         var lp = pt(i, RAD + 17), a = Math.abs(lp[0] - cx) < 8 ? "middle" : (lp[0] > cx ? "start" : "end");
         var lbl = SHORT[p.role] || (p.name || "").split(" ")[0].toUpperCase();
-        s += '<text x="' + lp[0].toFixed(1) + '" y="' + lp[1].toFixed(1) + '" text-anchor="' + a + '" font-family="var(--mono)" font-size="6.5" letter-spacing="0.4" fill="var(--label)">' + esc(lbl) + '</text>';
-        s += '<text x="' + lp[0].toFixed(1) + '" y="' + (lp[1] + 8.5).toFixed(1) + '" text-anchor="' + a + '" font-family="var(--sans)" font-weight="800" font-size="8.5" fill="var(--accent)">' + (p.strength || 0).toFixed(1) + '</text>';
+        s += '<text x="' + lp[0].toFixed(1) + '" y="' + lp[1].toFixed(1) + '" text-anchor="' + a + '" font-family="var(--mono)" font-size="6.5" letter-spacing="0.4" fill="var(--vec-lbl-fill)">' + esc(lbl) + '</text>';
+        s += '<text x="' + lp[0].toFixed(1) + '" y="' + (lp[1] + 8.5).toFixed(1) + '" text-anchor="' + a + '" font-family="var(--sans)" font-weight="800" font-size="8.5" fill="var(--vec-val-fill)">' + (p.strength || 0).toFixed(1) + '</text>';
       });
       vec.innerHTML = s;
     }
