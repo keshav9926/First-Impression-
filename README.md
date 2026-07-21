@@ -15,36 +15,52 @@ One autonomous pipeline — **plan → crawl → render → sanitize → index �
 
 ---
 
-## What it does
+## Contents
+
+1. [What it does](#1-what-it-does)
+2. [How it was built — phase by phase](#2-how-it-was-built--phase-by-phase)
+3. [Architecture](#3-architecture)
+4. [Trust & grounding](#4-trust--grounding)
+5. [Reliability engineering](#5-reliability-engineering)
+6. [Run it](#6-run-it)
+7. [The deliverable](#7-the-deliverable-one-page-per-company)
+8. [Design decisions](#8-design-decisions)
+9. [Evals & tests](#9-evals--tests)
+10. [Project structure](#10-project-structure)
+
+---
+
+## 1. What it does
 
 - **Crawls** any public site (robots-compliant), **headless-renders** JS/SPA pages, and **reads product screenshots** with a vision model — so nothing on the page is invisible to it.
-- **Explores** the site as an autonomous **ReAct agent** (decides what to read and search), then judges the same evidence through a **3-persona panel** (technical evaluator · business buyer · first-time user).
+- **Explores** the site as an autonomous **ReAct agent** (decides what to read and search), then judges the same evidence through a **3-persona panel** — technical evaluator · business buyer · first-time user.
 - **Synthesizes** a structured `FirstImpressionReport` — product identity, likely new-user journey, friction, standout strengths, open questions, and forward-looking improvement ideas.
 - **Self-verifies** every claim against its cited page and **drops anything unsupported** — the failure mode is a shorter report, never a wronger one.
 - **Delivers** one static, shareable page per company (engineering-datasheet design), plus a paste-ready outreach draft.
 
 ---
 
-## Why it's trustworthy
+## 2. How it was built — phase by phase
 
-FIE is designed around one rule: **never say anything about a company that its public pages don't support.**
+Built one phase at a time, with a review gate between each — RAG foundations first, then agents, then the guardrails and delivery that make it trustworthy and shippable.
 
-| Guard | What it does |
-|---|---|
-| **robots.txt gate** | Checked *before* any request. Disallowed → no fetch, ever. Public pages only — no login areas, no scraping behind auth |
-| **Prompt-injection sanitizer** | Page text is scrubbed of instruction-like content before it ever reaches an LLM |
-| **Structural citations** | The `FirstImpressionReport` schema *requires* a `source_url` on every observation — uncited claims cannot exist |
-| **Citation verification** | Any claim citing a page that was never ingested is dropped in code, not by prompt |
-| **Groundedness judge** | A second adversarial LLM pass reads each claim next to its cited page's actual text and drops unsupported ones |
-| **Contradiction check** | Uncited statements (persona impressions, open questions) are checked against *all* page text — "X is not mentioned" is dropped when the site does mention X (caught live: a claimed "no SOC 2" vs a site's "SOC 2 audit in progress") |
-| **Visual-evidence metadata** | Image alt-text/filenames and vision captions are captured as metadata, preventing false "no product screenshots" claims about pages full of dashboard shots |
-| **Empty-evidence refusal** | A robots-blocked or dead crawl produces HTTP 409, never a fabricated report |
-| **Relevance gate** | Retrieval refuses to answer when nothing clears a calibrated relevance floor (fail-closed) |
-| **Judge determinism** | The fact-check pass runs at temperature 0 — same evidence, same verdicts |
+| Phase | What shipped | Key tech |
+|---|---|---|
+| **0 · Skeleton** | FastAPI app, Docker, typed env config, dependency setup | FastAPI · Docker · pydantic-settings · uv |
+| **1 · Ingestion & RAG** | robots-compliant crawler → chunk → embed → Chroma; grounded Q&A over one company's site | httpx · ChromaDB · embeddings |
+| **2 · Retrieval quality** | Hybrid **dense + BM25** → **RRF** fusion → **cross-encoder rerank** → calibrated relevance gate; hit@5 / MRR eval | BM25 · Reciprocal Rank Fusion · Voyage rerank |
+| **3 · Analysis agent** | Single **ReAct** agent (`list_pages` / `read_page` / `search_content`) → schema-constrained, fully-cited report | ReAct · tool-calling · Pydantic |
+| **4 · Persona panel** | **LangGraph** fan-out/fan-in: three personas judge one shared exploration in parallel | LangGraph |
+| **5 · Guardrails** | **Groundedness judge** (LLM-as-judge), contradiction check, **prompt-injection sanitizer**, empty-evidence refusal (HTTP 409) | LLM-as-judge |
+| **6 · Streaming + JS rendering** | **SSE** live dashboard (crawl→report streamed step-by-step); **Playwright** headless render unlocked Framer/Webflow/SPA sites | Server-Sent Events · Playwright |
+| **7 · MCP server** | Same pipeline exposed as **MCP tools** (stdio) for Claude Desktop / Claude Code / IDEs — delegates to the same functions, so HTTP and MCP never drift | FastMCP |
+| **8 · Observability & Docker** | **Langfuse** tracing (one span tree per run, auto-captured generations); production container with Chromium + persistent vector volume | Langfuse · Docker |
+| **9 · Vision** | A **VLM** captions product screenshots the text extractor is blind to, with a multi-model failover chain — kills false "no screenshots" findings | Nemotron VLM |
+| **10 · Reliability & delivery** | Multi-model **NVIDIA failover pool** (circuit breaker, per-minute vs per-day 429 intelligence, DEGRADED-deployment recovery, adaptive timeouts); **product-substance** prompt reframe; **Netlify** publishing | Multi-LLM orchestration · Netlify |
 
 ---
 
-## Architecture
+## 3. Architecture
 
 ```
 URL ──► robots.txt gate ──► Crawl (httpx, BFS, same-domain)
@@ -76,6 +92,39 @@ URL ──► robots.txt gate ──► Crawl (httpx, BFS, same-domain)
                      FirstImpressionReport ──► static web page / MCP / API / outreach
 ```
 
+### Model roles
+
+| Role | Model |
+|---|---|
+| Explore / personas / synthesis / judge | Failover chain (mode-selected — see below) |
+| Vision (screenshot captions) | `nemotron-3-nano-omni-30b` → 2-model VLM failover |
+| Embeddings | `nvidia/nemotron-3-embed-1b` (2048-dim) |
+| Rerank | Voyage `rerank-2.5-lite` cross-encoder (calibrated gate) |
+| Observability | Langfuse (optional; hard no-op without keys) |
+
+---
+
+## 4. Trust & grounding
+
+FIE is designed around one rule: **never say anything about a company that its public pages don't support.**
+
+| Guard | What it does |
+|---|---|
+| **robots.txt gate** | Checked *before* any request. Disallowed → no fetch, ever. Public pages only — no login areas, no scraping behind auth |
+| **Prompt-injection sanitizer** | Page text is scrubbed of instruction-like content before it ever reaches an LLM |
+| **Structural citations** | The `FirstImpressionReport` schema *requires* a `source_url` on every observation — uncited claims cannot exist |
+| **Citation verification** | Any claim citing a page that was never ingested is dropped in code, not by prompt |
+| **Groundedness judge** | A second adversarial LLM pass reads each claim next to its cited page's actual text and drops unsupported ones |
+| **Contradiction check** | Uncited statements (persona impressions, open questions) are checked against *all* page text — "X is not mentioned" is dropped when the site does mention X (caught live: a claimed "no SOC 2" vs a site's "SOC 2 audit in progress") |
+| **Visual-evidence metadata** | Image alt-text/filenames and vision captions are captured as metadata, preventing false "no product screenshots" claims about pages full of dashboard shots |
+| **Empty-evidence refusal** | A robots-blocked or dead crawl produces HTTP 409, never a fabricated report |
+| **Relevance gate** | Retrieval refuses to answer when nothing clears a calibrated relevance floor (fail-closed) |
+| **Judge determinism** | The fact-check pass runs at temperature 0 — same evidence, same verdicts |
+
+---
+
+## 5. Reliability engineering
+
 ### Failover pipelines
 
 `→` means *"if this model fails or produces no valid report, run the next one."* Every LLM call in a run (explore, personas, synthesis, judge) inherits the selected chain.
@@ -87,7 +136,7 @@ URL ──► robots.txt gate ──► Crawl (httpx, BFS, same-domain)
 
 All models run on the NVIDIA API (one key); GLM-5.2 and Mistral-Medium are configured as additional fallbacks. Failover includes **quality-failover** — a synthesis whose JSON doesn't validate against the report schema falls through to the next model.
 
-### Reliability engineering (the LLM pool)
+### The LLM pool
 
 Free-tier LLM endpoints are flaky; a single report fires dozens of calls, so one bad response must never kill a run. The pool (`app/agent/llm_pool.py`) fails over — or retries in place — on every failure mode observed live:
 
@@ -99,19 +148,9 @@ Free-tier LLM endpoints are flaky; a single report fires dozens of calls, so one
 - **Adaptive timeouts** — 300s for slow reasoning models / deep mode (no time budget), 60s for fast paths.
 - **Tolerant JSON parsing** — reasoning models wrap output in `<think>` blocks, fences, or a single-key object; the parser unwraps all three before validating.
 
-### Model roles
-
-| Role | Model |
-|---|---|
-| Explore / personas / synthesis / judge | Chain above (mode-selected) |
-| Vision (screenshot captions) | `nemotron-3-nano-omni-30b` → 2-model VLM failover |
-| Embeddings | `nvidia/nemotron-3-embed-1b` (2048-dim) |
-| Rerank | Voyage `rerank-2.5-lite` cross-encoder (calibrated gate) |
-| Observability | Langfuse (optional; hard no-op without keys) |
-
 ---
 
-## Quickstart
+## 6. Run it
 
 ```bash
 # 1. deps (Python ≥3.12)
@@ -128,13 +167,9 @@ uv run uvicorn app.main:app --reload
 # live dashboard at http://127.0.0.1:8000  ·  API docs at /docs
 ```
 
-Docker:
+Docker: `docker compose up --build`
 
-```bash
-docker compose up --build
-```
-
-## API
+### HTTP API
 
 | Method | Path | Description |
 |---|---|---|
@@ -144,9 +179,9 @@ docker compose up --build
 | `POST` | `/report?panel=true&deep=false` | Full report; `deep=true` selects the accuracy-first chain |
 | `GET` | `/analyze/stream?url=...&deep=false` | One-call crawl+report with live SSE progress events |
 
-## MCP server
+### MCP server
 
-The same pipeline, exposed over the Model Context Protocol (stdio) for Claude Desktop / Claude Code / IDEs:
+The same pipeline over the Model Context Protocol (stdio) for Claude Desktop / Claude Code / IDEs:
 
 ```bash
 uv run python -m app.mcp_server
@@ -156,7 +191,7 @@ Tools: `analyze_first_impression(url, max_pages, panel, deep)` · `ask_ingested(
 
 ---
 
-## The deliverable: one page per company
+## 7. The deliverable: one page per company
 
 Each analyzed company gets a single, static, shareable report page (engineering-datasheet design — monochrome, mono-forward, print-like):
 
@@ -177,34 +212,31 @@ python -m web.render_report vortexify  # just one
 python -m web.deploy                   # publish web/dist/ to Netlify → prints each link
 ```
 
-Scores on the page are **derived from real signals** (persona verdicts, strength/friction balance, crawl coverage) — never invented. Founders receive a link, not a file; viewing costs zero backend.
-
-`evals/build_outreach_xlsx.py` builds `outreach.xlsx` — company, founder, contact, and a paste-ready, credit-first email draft distilled from each verified report.
+Scores on the page are **derived from real signals** (persona verdicts, strength/friction balance, crawl coverage) — never invented. Founders receive a link, not a file; viewing costs zero backend. `evals/build_outreach_xlsx.py` builds `outreach.xlsx` — a paste-ready, credit-first email draft distilled from each verified report.
 
 ---
 
-## Design decisions
+## 8. Design decisions
 
 - **Reads the product, not just the funnel.** Prompts push the agent to form a genuine view on the product itself — its core idea, what's distinctive, the philosophy the site reveals — and to make improvement ideas about *product/positioning/narrative*, not only "add a pricing table." Still fully grounded: sharper interpretation of real evidence, never invention.
 - **Explore-then-synthesize.** Free-form ReAct exploration first (the agent decides what to read/search), then a separate schema-constrained synthesis pass. Creativity where it helps, structure where it matters.
 - **One store, one company.** Chroma holds the company being analyzed; each ingest starts clean. Reports are frozen to JSON + static HTML at generation time, so nothing depends on the store afterward.
-- **Custom chunker over LangChain.** Chunking is ~60 lines: paragraph-aware packing to ~1600 chars with tail overlap. LangChain's `RecursiveCharacterTextSplitter` is the standard alternative and would slot in directly — the custom version was chosen to keep the ingestion path dependency-light and fully inspectable, not because the alternative wouldn't work.
+- **Custom chunker over LangChain.** Chunking is ~60 lines: paragraph-aware packing to ~1600 chars with tail overlap. LangChain's `RecursiveCharacterTextSplitter` is the standard alternative and would slot in directly — the custom version keeps the ingestion path dependency-light and fully inspectable.
 - **Judge can only drop, never add.** The verification layer removes unsupported or contradicted content; it cannot introduce new claims. Failure mode is a shorter report, not a wronger one.
 - **Fail-open judge, surfaced.** If the judge model is unavailable the report still ships — but with an explicit scope-note caveat that the automated fact-check didn't run.
 - **Kind but honest.** Reports credit what works first, never manufacture positivity, and phrase friction observationally ("a first-time visitor may hesitate here") — they're sent to the founders themselves.
 
-## Evals
+---
 
-`evals/` contains the harnesses that drove the model and threshold choices:
+## 9. Evals & tests
+
+`evals/` holds the harnesses that drove the model and threshold choices:
 
 - `model_bakeoff*.py` — multi-model bake-off (real companies, LLM-referee scoring) that produced the chains above
 - `embed_rerank_bakeoff.py` — embedding/rerank provider comparison (kept Voyage rerank for its calibrated score scale; moved embeddings to NVIDIA for speed)
 - `vision_bakeoff.py` — VLM comparison on real product dashboards (picked omni-30b on speed + accuracy)
 - `run_retrieval_eval.py` — hit@5 / MRR over a labeled retrieval set
 - `run_report.py` / `run_deep_reports.py` / `rejudge_reports.py` — production runs on real companies + guard-pass re-application
-- `build_outreach_xlsx.py` — the outreach workbook
-
-## Tests
 
 ```bash
 uv run python -m pytest tests/ -q     # 85 tests, no network
@@ -212,7 +244,9 @@ uv run python -m pytest tests/ -q     # 85 tests, no network
 
 Covers: crawling/robots, sanitizer, chunking, retrieval fusion + gate, agent failover chains, panel merging, judge (support + contradiction + truncation salvage + fail-open), API endpoints, SSE streaming, MCP wrappers.
 
-## Project structure
+---
+
+## 10. Project structure
 
 ```
 app/
