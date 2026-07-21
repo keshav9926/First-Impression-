@@ -13,8 +13,6 @@ One autonomous pipeline — **plan → crawl → render → sanitize → index �
 | **Vortexify** (`vortexify.ai`) | **[firstimpressione.netlify.app/vortexify](https://firstimpressione.netlify.app/vortexify)** |
 | **KAINest** (`kainest.com`) | **[firstimpressione.netlify.app/kainest](https://firstimpressione.netlify.app/kainest)** |
 
-**Made by Keshav Kakani** · kkakani160@gmail.com · [github.com/keshav9926](https://github.com/keshav9926) · +91 90240 99116
-
 ---
 
 ## What it does
