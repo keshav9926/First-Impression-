@@ -31,7 +31,28 @@ from app import events, observability
 from app.agent import groq_driver, llm_pool, personas
 from app.schemas import FirstImpressionReport, PersonaImpression
 
-_PERSONA_RETRIES = 2  # JSON-mode replies occasionally malformed — one re-ask
+_PERSONA_RETRIES = 3  # JSON-mode replies occasionally malformed — re-ask a couple times
+
+_PERSONA_FIELDS = {"persona", "what_resonated", "friction", "would_sign_up", "reason"}
+
+
+def _parse_persona(content: str) -> dict | None:
+    """Tolerant persona-JSON extraction. Reasoning models (nemotron) under a
+    large evidence block don't always emit the bare object we asked for: they
+    prepend a <think> block, wrap in ```json fences, or nest the object under a
+    single key ({"technical_evaluator": {...}}). Reuse the main-report path's
+    robust extractor (strips think/fences, balanced-brace scan), then unwrap a
+    single-key wrapper if the top level is missing our fields. Returns a dict to
+    validate, or None if nothing usable was found."""
+    data = groq_driver._extract_report_json(content or "")
+    if not isinstance(data, dict):
+        return None
+    if _PERSONA_FIELDS <= data.keys():
+        return data
+    for value in data.values():  # unwrap {"<persona>": {the real object}}
+        if isinstance(value, dict) and _PERSONA_FIELDS <= value.keys():
+            return value
+    return data  # let PersonaImpression.model_validate surface the real error
 
 
 class PanelState(TypedDict):
@@ -63,11 +84,15 @@ def _judge_as(persona: dict, evidence: str) -> PersonaImpression:
                 {"role": "user", "content": f"EVIDENCE:\n\n{evidence}"},
             ],
             response_format={"type": "json_object"},
+            max_tokens=4000,  # reasoning models truncate the JSON without a budget
             label="persona-judge",
         )
         try:
-            return PersonaImpression.model_validate(json.loads(message.content or ""))
-        except (json.JSONDecodeError, pydantic.ValidationError) as exc:
+            data = _parse_persona(message.content or "")
+            if data is None:
+                raise ValueError("no JSON object found in persona reply")
+            return PersonaImpression.model_validate(data)
+        except (json.JSONDecodeError, pydantic.ValidationError, ValueError) as exc:
             last_error = exc  # malformed reply — re-ask (sampling glitch)
     raise ValueError(f"Persona {persona['key']} returned unusable JSON: {last_error}")
 

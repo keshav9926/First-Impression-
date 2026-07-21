@@ -57,12 +57,12 @@ _DAILY_MARKERS = ("per day", "tokens per day", "tpd", "rpd", "daily")
 
 
 # Every NVIDIA model we know how to call (one nvapi key, integrate.api).
-_NVIDIA_PROVIDERS = ("glm", "dspro", "dsflash", "nemo", "mistral")
+_NVIDIA_PROVIDERS = ("nemo", "glm", "dspro", "dsflash", "mistral")
 
 # The two report pipelines (see config.pipeline_mode). "→" = failover order.
 _CHAINS = {
-    "deep": ("glm", "dspro", "dsflash", "nemo"),   # accuracy-first, no time budget
-    "normal": ("dspro", "dsflash", "nemo"),        # fast default
+    "deep": ("dspro", "dsflash", "nemo"),          # DeepSeek-V4-Pro leads, V4-Flash same-family failover, Nemotron final net (no GLM)
+    "normal": ("nemo", "dspro", "dsflash"),        # fast default
 }
 
 # Per-request pipeline selection (set by report.generate_report via use_mode).
@@ -262,6 +262,13 @@ def chat(
         # Pass name/metadata so the auto-captured generation is well-named
         # (no-op unless tracing is on).
         create_kwargs = dict(kwargs)
+        # deep mode has NO time budget: reasoning models (nemo/glm/dspro) over a
+        # large evidence block routinely exceed 60s, and a timeout here fails the
+        # whole run once the (short) fallback chain is also exhausted. So give the
+        # slow reasoning models — and EVERY provider in deep mode — a generous cap.
+        slow = provider in ("glm", "dspro", "nemo") or _active_mode() == "deep"
+        default_timeout = 300.0 if slow else 60.0
+        create_kwargs.setdefault("timeout", default_timeout)
         if observability.enabled():
             create_kwargs["name"] = label
             create_kwargs["metadata"] = {"provider": provider, "role": label}
@@ -323,7 +330,18 @@ def chat(
             except openai.BadRequestError as exc:
                 _tally(provider, model_name, "bad_request")  # count ALL 400s for visibility
                 last_exc = exc
-                if "tool_use_failed" not in str(exc):
+                msg = str(exc)
+                # NVIDIA returns a 400 "DEGRADED function cannot be invoked" when it
+                # has taken a model's deployment offline (observed live on dspro,
+                # 2026-07-20). It is an AVAILABILITY error wearing a 400: retrying
+                # the same provider is pointless, but the OTHER providers are fine.
+                # So fail over like a daily cap — trip it for the run and move on,
+                # instead of re-raising and killing a multi-minute report.
+                if "DEGRADED" in msg or "cannot be invoked" in msg:
+                    logger.warning("%s deployment DEGRADED — failing over", provider)
+                    _trip(provider, _DAILY_COOLDOWN)  # won't recover soon → stop asking
+                    break
+                if "tool_use_failed" not in msg:
                     raise  # real bad request — surface it
                 format_tries += 1  # stochastic malformed tool-call → re-ask
                 if format_tries >= _MAX_FORMAT_RETRIES:
