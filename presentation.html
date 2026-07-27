@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>First Impression Engine (FIE) — Technical Master Slide Deck</title>
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- Marked.js & Highlight.js for Markdown Rendering -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked-highlight@2.1.0/src/index.umd.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['Fira Code', 'monospace'],
+          },
+          colors: {
+            brand: {
+              50: '#eef2ff',
+              100: '#e0e7ff',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+              900: '#312e81',
+            },
+            darkbg: '#0b0f19',
+            darkcard: '#111827',
+            darkborder: '#1f2937',
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    /* Custom Scrollbars */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.6);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 4px;
+    }
+
+    /* Slide Deck Specific Styles */
+    .slide-card {
+      display: none;
+      min-height: calc(100vh - 8rem);
+    }
+    .slide-card.active {
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Typography in slides */
+    .prose-slide {
+      max-width: 100%;
+      color: #cbd5e1;
+      font-size: 1.05rem;
+      line-height: 1.7;
+    }
+    .prose-slide h1 {
+      font-size: 2.25rem;
+      font-weight: 800;
+      color: #f8fafc;
+      margin-bottom: 1rem;
+      letter-spacing: -0.025em;
+    }
+    .prose-slide h2 {
+      font-size: 1.65rem;
+      font-weight: 700;
+      color: #818cf8;
+      margin-top: 1rem;
+      margin-bottom: 1rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid #1e293b;
+    }
+    .prose-slide h3 {
+      font-size: 1.3rem;
+      font-weight: 600;
+      color: #38bdf8;
+      margin-top: 1.25rem;
+      margin-bottom: 0.75rem;
+    }
+    .prose-slide h4 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #a7f3d0;
+      margin-top: 1rem;
+      margin-bottom: 0.5rem;
+    }
+    .prose-slide p {
+      margin-bottom: 1rem;
+    }
+    .prose-slide ul {
+      list-style-type: disc;
+      padding-left: 1.5rem;
+      margin-bottom: 1rem;
+    }
+    .prose-slide ol {
+      list-style-type: decimal;
+      padding-left: 1.5rem;
+      margin-bottom: 1rem;
+    }
+    .prose-slide li {
+      margin-bottom: 0.4rem;
+    }
+    .prose-slide blockquote {
+      border-left: 4px solid #6366f1;
+      padding: 0.75rem 1.25rem;
+      margin: 1.25rem 0;
+      font-style: italic;
+      color: #94a3b8;
+      background: rgba(99, 102, 241, 0.08);
+      border-radius: 0 0.5rem 0.5rem 0;
+    }
+    .prose-slide code {
+      font-family: 'Fira Code', monospace;
+      font-size: 0.875em;
+      background-color: #1e293b;
+      color: #38bdf8;
+      padding: 0.2em 0.45em;
+      border-radius: 0.25rem;
+    }
+    .prose-slide pre {
+      background-color: #0f172a !important;
+      border: 1px solid #1e293b;
+      border-radius: 0.5rem;
+      padding: 1.25rem;
+      overflow-x: auto;
+      margin: 1.25rem 0;
+      position: relative;
+    }
+    .prose-slide pre code {
+      background-color: transparent !important;
+      color: #f8fafc;
+      padding: 0;
+    }
+    .prose-slide table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1.25rem 0;
+      font-size: 0.9rem;
+    }
+    .prose-slide th {
+      background-color: #1e293b;
+      color: #f8fafc;
+      font-weight: 600;
+      text-align: left;
+      padding: 0.75rem 1rem;
+      border: 1px solid #334155;
+    }
+    .prose-slide td {
+      padding: 0.75rem 1rem;
+      border: 1px solid #1e293b;
+      color: #cbd5e1;
+      vertical-align: top;
+    }
+    .prose-slide tr:nth-child(even) {
+      background-color: rgba(30, 41, 59, 0.3);
+    }
+    .prose-slide tr:hover {
+      background-color: rgba(99, 102, 241, 0.1);
+    }
+
+    /* Print Styles for PDF Generation */
+    @media print {
+      body {
+        background-color: #ffffff !important;
+        color: #0f172a !important;
+      }
+      header, footer, #progress-bar, #nav-controls, #overview-grid {
+        display: none !important;
+      }
+      .slide-card {
+        display: flex !important;
+        page-break-after: always;
+        min-height: 100vh;
+        border: none !important;
+        box-shadow: none !important;
+        background: white !important;
+        color: black !important;
+      }
+      .prose-slide {
+        color: #1e293b !important;
+      }
+      .prose-slide h1, .prose-slide h2, .prose-slide h3, .prose-slide h4 {
+        color: #0f172a !important;
+      }
+      .prose-slide pre {
+        background-color: #f1f5f9 !important;
+        border: 1px solid #cbd5e1 !important;
+      }
+      .prose-slide pre code {
+        color: #0f172a !important;
+      }
+      .prose-slide table th {
+        background-color: #e2e8f0 !important;
+        color: #0f172a !important;
+      }
+      .prose-slide table td {
+        border-color: #cbd5e1 !important;
+        color: #1e293b !important;
+      }
+    }
+  </style>
+</head>
+<body class="bg-[#0b0f19] text-slate-300 font-sans antialiased min-h-screen flex flex-col justify-between select-none">
+
+  <!-- Top Progress Bar -->
+  <div id="progress-bar-container" class="w-full bg-slate-900 h-1.5 sticky top-0 z-50">
+    <div id="progress-bar" class="bg-indigo-500 h-full w-0 transition-all duration-300"></div>
+  </div>
+
+  <!-- Header -->
+  <header class="bg-[#0b0f19]/90 backdrop-blur-md border-b border-slate-800/80 px-4 sm:px-8 py-3 flex items-center justify-between z-40">
+    <div class="flex items-center space-x-3">
+      <div class="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-500/30 text-sm">
+        FIE
+      </div>
+      <div>
+        <h1 class="text-sm font-bold text-slate-100 leading-tight">First Impression Engine</h1>
+        <p class="text-[11px] text-indigo-400 font-medium">Master Presentation Slide Deck (Phases 0–9)</p>
+      </div>
+    </div>
+
+    <!-- Right Controls -->
+    <div class="flex items-center space-x-3 text-xs">
+      <button id="toggle-grid-btn" class="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-3 py-1.5 rounded-lg flex items-center space-x-1.5 transition-colors">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 14a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 14a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path>
+        </svg>
+        <span>Overview (O)</span>
+      </button>
+
+      <button onclick="window.print()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-3 py-1.5 rounded-lg flex items-center space-x-1.5 transition-colors">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H7a2 2 0 00-2 2v4h10z"></path>
+        </svg>
+        <span>PDF Export</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Slide Display Container -->
+  <main id="main-container" class="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-6 flex flex-col justify-center">
+    
+    <!-- Active Slide Container -->
+    <div id="slides-wrapper">
+      <!-- Slides will be parsed from PRESENTATION.md and injected here -->
+    </div>
+
+    <!-- Grid / Overview View Overlay (Hidden by default) -->
+    <div id="overview-grid" class="hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 py-4">
+      <!-- Thumbnails injected dynamically -->
+    </div>
+
+  </main>
+
+  <!-- Bottom Navigation Control Bar -->
+  <footer id="nav-controls" class="bg-[#0b0f19]/90 backdrop-blur-md border-t border-slate-800 px-6 py-3 flex items-center justify-between">
+    <div class="text-xs text-slate-400 flex items-center space-x-2">
+      <span id="slide-counter" class="font-bold text-slate-200">Slide 1 of 13</span>
+      <span class="text-slate-600">|</span>
+      <span class="hidden sm:inline">Use <kbd class="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded text-[10px]">←</kbd> <kbd class="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded text-[10px]">→</kbd> keys to navigate</span>
+    </div>
+
+    <div class="flex items-center space-x-2">
+      <button id="prev-btn" class="bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-slate-200 border border-slate-700 px-4 py-2 rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+        </svg>
+        <span>Previous</span>
+      </button>
+
+      <button id="next-btn" class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white border border-indigo-500 px-4 py-2 rounded-lg text-xs font-semibold flex items-center space-x-1.5 shadow-lg shadow-indigo-500/20 transition-colors">
+        <span>Next</span>
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+        </svg>
+      </button>
+    </div>
+  </footer>
+
+  <!-- Embedded PRESENTATION.md Source -->
+  <script id="markdown-source" type="text/markdown">
+# First Impression Engine (FIE) — Technical Presentation & System Architecture
+
+> **Master Slide Deck & Technical Blueprint**  
+> *End-to-End System Evolution from Phase 0 to Phase 9*  
+> **Target Audience**: Technical Mentors, System Architects, & Engineering Evaluation Panels
+
+---
+
+## Slide 1: Title & Executive Overview
+
+### **First Impression Engine (FIE)**
+*Autonomous Outside-In Product Analysis & Grounded Multi-Agent Evaluation Platform*
+
+- **Presenter**: Engineering Lead / Developer
+- **Scope**: Complete System Evolution (Phases 0 through 9)
+- **Core Focus**: High-Reliability Agentic Systems, Hybrid RAG, Multi-Provider Failover Pools, & Grounded Verification
+
+#### **Key System Metrics**
+- **Architecture**: Hybrid RAG + ReAct Agent + LangGraph Parallel Panel + Multi-LLM Pool
+- **Verification Stack**: 5-Layer Trust Pipeline (0 Unbacked Claims)
+- **Scale Capability**: Dual-Provider Execution (Groq Explore + Gemini Final Eval Synthesis)
+- **Latency / Performance**: 5-Step Cap ReAct Loop, Parallel Persona Fan-Out, Live SSE Streaming
+
+---
+
+## Slide 2: Problem Statement & Operating Philosophy
+
+### **The Problem: Founder Blind Spots**
+- Founders and product teams suffer from *curse of knowledge*—they know how their product works and cannot experience their own public site as a stranger.
+- Traditional tools audit SEO, page speed, or surface UI elements, but **cannot evaluate product substance, value proposition clarity, or onboarding friction**.
+
+### **Core Operating Principles (Hard Rules)**
+1. **Rule #1 (Public Data Only)**: Respects `robots.txt` strictly. Analyzes only pre-signup, publicly accessible content.
+2. **Rule #2 (Zero Hallucination Guarantee)**: Every claim must be grounded in ingested page text with verified source URLs. Unsupported claims are dropped by verification layers.
+3. **Fail-Closed Retrieval & Fail-Open Verification**: Retrieval refuses to answer if relevance is below calibrated threshold ($<0.30$); verification layers drop invalid claims so failure results in a shorter report, never an inaccurate one.
+
+---
+
+## Slide 3: End-to-End System Architecture
+
+```
+[ USER / DASHBOARD / MCP CLIENT ]
+               │
+               ▼
+   ┌──────────────────────┐
+   │ FastAPI / MCP Server │
+   └──────────┬───────────┘
+              │
+              ▼
+   ┌──────────────────────┐
+   │ Robots.txt Gate      │  ◄── Rule #1 (Public Data Only)
+   └──────────┬───────────┘
+              │
+              ▼
+   ┌──────────────────────┐
+   │ BFS Crawl &          │  ◄── Escalates to Playwright Chromium
+   │ Playwright JS Render │      on Thin Text Extraction (<1%)
+   └──────────┬───────────┘
+              │
+              ▼
+   ┌──────────────────────┐
+   │ Injection Sanitizer  │  ◄── Strips Prompt-Injection Regex Lines
+   └──────────┬───────────┘
+              │
+              ▼
+   ┌──────────────────────┐
+   │ Custom Paragraph     │  ◄── ~1600 chars, tail-overlap,
+   │ Chunker              │      attaches Headings & CTAs
+   └──────────┬───────────┘
+              │
+              ▼
+   ┌──────────────────────┐
+   │ Persistent Vector    │  ◄── Dense Vectors (Nemotron / Voyage)
+   │ Store (ChromaDB)     │
+   └──────────┬───────────┘
+              │
+              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                 HYBRID RETRIEVAL FUNNEL                     │
+│  Dense Vector (Top 20)  │  Sparse BM25 Keyword (Top 20)     │
+│             └───────────┴───────────┘                       │
+│                         ▼                                   │
+│            Reciprocal Rank Fusion (RRF)                     │
+│               + Guaranteed Seats (top 3)                    │
+│                         ▼                                   │
+│            Cross-Encoder Re-ranker                          │
+│               + Shifted Sigmoid Scaling                     │
+│                         ▼                                   │
+│            Calibrated Min Relevance Gate (≥ 0.30)           │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+                          ▼
+   ┌──────────────────────┐
+   │ ReAct Exploration    │  ◄── Groq Llama-3.3 (Max 5 Steps)
+   │ Agent                │      Section Maps on Truncation
+   └──────────┬───────────┘
+              │
+              ▼
+   ┌──────────────────────┐
+   │ LangGraph Parallel   │  ◄── 3 Parallel Personas: Tech Evaluator,
+   │ Persona Panel        │      Business Buyer, First-Time User
+   └──────────┬───────────┘
+              │
+              ▼
+   ┌──────────────────────┐
+   │ Gemini Synthesis     │  ◄── Native response_schema Enforcement
+   └──────────┬───────────┘
+              │
+              ▼
+   ┌──────────────────────┐
+   │ 5-Layer Trust Stack  │  ◄── Schema → Citation URL → Fact Judge
+   │                      │      → Contradiction → Scope Caveats
+   └──────────┬───────────┘
+              │
+              ▼
+[ VERIFIED REPORT OUTPUT: Web HTML / PDF / SSE / MCP ]
+```
+
+---
+
+## Slide 4: Phase 0 & 1 — Pipeline Foundation & Ingestion
+
+### **Fast Same-Domain Crawling**
+- **BFS Crawl Loop**: Implemented with `httpx`. Deduplicates URLs by canonicalizing (dropping query params `?ref=` and fragments `#section`).
+- **Segment Exclusion**: Blocks authentication/account paths (`/login`, `/signup`) via path-segment matching rather than coarse substring matching.
+
+### **Robots.txt Politeness Gate (`app/ingestion/robots.py`)**
+- Uses `urllib.robotparser.RobotFileParser`. Caches parser instances per origin with a 1-hour TTL (`_TTL_SECONDS = 3600.0`).
+- **Fail-Closed Design**: If fetching `robots.txt` encounters a network failure, the parser sets `disallow_all = True`. Access must be explicitly verified.
+
+### **Custom Paragraph-Aware Chunker (`app/ingestion/chunker.py`)**
+- **Why Custom over LangChain?**: Cuts framework overhead, preserves natural paragraph boundaries (`\n\n`), and binds page metadata (headings, CTAs) directly to chunks.
+- **Algorithm**:
+  1. Splits text into paragraph units.
+  2. Greedily packs paragraphs up to `max_chars = 1600` (~400 tokens).
+  3. Overlaps the last paragraph into the next chunk window to prevent edge context loss.
+
+---
+
+## Slide 5: Phase 2 — Hybrid Retrieval Funnel & Math
+
+### **1. Dense Vectors vs. Sparse BM25**
+- **Dense Vector Search**: Captures semantic intent using `nvidia/nemotron-3-embed-1b` (2048 dimensions). Uses asymmetric retrieval mode (`input_type="passage"` for documents, `input_type="query"` for questions).
+- **Sparse BM25 Search**: Uses `rank_bm25` (`BM25Okapi`) with custom light stemming (`-ing`, `-es`, `-ed`, `-s`). Captures exact acronyms (`SOC2`, `OEE`, `SDK`).
+
+### **2. Reciprocal Rank Fusion (RRF) & Guaranteed Seats**
+$$\text{RRF Score}(d) = \sum_{m \in M} \frac{1}{60 + r_m(d)}$$
+- **The RRF Bug & Fix**: Standard RRF consensus could omit a document ranked **#1 in Vector Search** if BM25 ranked it poorly due to stemming mismatches.
+- **Engineering Comeback**: Implemented **Guaranteed Seats (`guaranteed_per_list = 3`)** in `fusion.py`. The top 3 candidates from *each* arm are guaranteed a seat in the candidate pool sent to the cross-encoder.
+
+### **3. Shifted Sigmoid Reranker Normalization**
+- NVIDIA Cross-Encoder Reranker outputs raw logits $L \in [-20, +5]$. Standard sigmoid compresses negative logits near 0.0.
+- **Shifted Sigmoid Formula**:
+  $$S_{\text{norm}} = \frac{1}{1 + e^{-\frac{L - (-10.0)}{3.0}}}$$
+  Re-centers the distribution so relevant items map to $>0.30$, and junk falls below the calibrated **0.30 Relevance Gate**.
+
+---
+
+## Slide 6: Phase 3 — ReAct Exploration Loop & History Management
+
+### **ReAct (Reason + Act + Observe) Agent**
+- Driven by Groq (Llama-3.3-70B). Executes tool calls: `list_pages`, `read_page`, `search_content`.
+- Hard-capped at **5 Steps** (`MAX_STEPS = 5`): Sufficient for `list_pages` (1) $\rightarrow$ `read_page` key pages (2-3) $\rightarrow$ `search_content` (1).
+
+### **Solving the Unknown-Unknown: Section Maps**
+- `read_page` outputs are capped at 4,000 characters. When truncated, the agent was blind to deeper page sections.
+- **Solution**: Prepend an HTML Heading Section Map ($h_1..h_3$) to truncated `read_page` observations. The agent learns what sections exist deeper on the page and issues targeted `search_content` calls.
+
+### **Bounded Context Window (`_trim_history`)**
+- Prevents $O(N^2)$ token explosion during multi-step tool calls by keeping the 2 most recent observations verbatim and trimming older tool responses to 600 characters. Includes a **Repeat-Call Guard** to prevent duplicate argument calls.
+
+---
+
+## Slide 7: Phase 4 — LangGraph Multi-Persona Panel
+
+### **LangGraph State Graph Topology**
+- **Explore Once, Judge Thrice**: The ReAct agent explores the site *once*, producing a shared evidence base.
+- **Parallel Fan-Out**: Graph fans out to 3 parallel persona nodes (*Technical Evaluator*, *Business Buyer*, *First-Time End User*).
+- **Reducer**: Uses `operator.add` on the `impressions` state list to prevent concurrent write race conditions.
+
+```
+                  ┌──────────────────────────┐
+                  │ ReAct Exploration Node   │
+                  └────────────┬─────────────┘
+                               │
+               ┌───────────────┼───────────────┐
+               ▼               ▼               ▼
+        ┌─────────────┐ ┌─────────────┐ ┌─────────────┐
+        │ Technical   │ │ Business    │ │ First-Time  │
+        │ Evaluator   │ │ Buyer       │ │ End User    │
+        └──────┬──────┘ └──────┬──────┘ └──────┬──────┘
+               └───────────────┼───────────────┘
+                               ▼
+                  ┌──────────────────────────┐
+                  │ Fan-In Merge Node        │
+                  └──────────────────────────┘
+```
+
+### **The CTA Erasure Comeback**
+- **Problem**: `favor_precision=True` in `trafilatura` stripped header/footer navigation debris, inadvertently deleting navbar `"Try for free"` CTA buttons. Personas falsely reported "no signup button".
+- **Fix**: Built pre-cleaning HTML AST CTA Collectors (`_CtaCollector`) in `fetcher.py`. Extracted CTAs ride as chunk metadata and surface on every `read_page` call.
+
+---
+
+## Slide 8: Phase 5 — Multi-Layer Verification & Guardrails
+
+### **5-Layer Trust Pipeline**
+1. **Layer 1 (Schema Enforcement)**: Pydantic `FirstImpressionReport` schema requires `claim`, `evidence`, and `source_url` on every `Observation`.
+2. **Layer 2 (Citation URL Matching)**: `enforce_citations` checks every `source_url` against canonical URLs in Chroma. Claims citing un-ingested URLs are dropped in code.
+3. **Layer 3 (Adversarial Fact-Check Judge)**: `verify_groundedness` runs a temperature 0.0 LLM pass comparing claims against stored chunk text. Unsupported claims are dropped.
+4. **Layer 4 (Contradiction Check)**: Uncited persona claims are checked against all stored text (e.g. claiming "no SOC 2" when text mentions "SOC 2 in progress").
+5. **Layer 5 (Fail-Open Scope Caveat)**: If judge call encounters an API outage, the report still ships with an explicit scope caveat banner attached to `scope_note`.
+
+### **Indirect Prompt Injection Defense (`app/ingestion/sanitize.py`)**
+- Regex line stripping removes instruction-shaped language (`ignore previous instructions`, `you are now`) before chunking. Count returned in `IngestResponse.injection_lines_removed`.
+
+---
+
+## Slide 9: Phase 6 — Playwright JS Escalation & Live SSE Dashboard
+
+### **The JS SPA "Black Hole" Failure & Comeback**
+- **Failure**: Static HTTP crawler extracted only 368 chars from `trynarrative.com` (a Framer SPA). Report hallucinated that the startup had no pricing or product features.
+- **Comeback**: Built **Playwright Chromium Headless Escalation** (`render.py`). If aggregate text < 1% or seed page < 1,200 chars, crawler automatically escalates to Playwright with auto-scrolling. Text extracted via `inner_text("body")`. Result: Text extraction jumped **368 chars $\rightarrow$ 1,706 chars**.
+
+### **Live SSE Streaming Dashboard (`/analyze/stream`)**
+- Uses Python `contextvars` (`app/events.py`) to create a thread-safe event bus.
+- Pipeline runs in a background thread while the main worker streams real-time SSE progress events (`crawl`, `render.escalate`, `tool`, `persona`, `report.done`) to `static/index.html`.
+
+---
+
+## Slide 10: Phase 7 & 8 — MCP Server & Observability
+
+### **Phase 7: Model Context Protocol (MCP) Server (`app/mcp_server.py`)**
+- Exposes analyzer tools over stdio via `FastMCP`: `analyze_first_impression`, `ask_ingested`, `ingestion_status`.
+- **Zero Code Drift**: Tools delegate directly to core FastAPI functions (`_ingest_site`, `generate_report`, `pipeline.retrieve`, `qa.answer`).
+
+### **Phase 8: Langfuse OpenTelemetry Tracing (`app/observability.py`)**
+- Zero-overhead no-op when unconfigured. Auto-instruments OpenAI client calls.
+- Creates hierarchical span trees: Root `report_trace` span $\rightarrow$ `agent` subagent spans $\rightarrow$ `retriever` spans $\rightarrow$ `generation` leaf nodes.
+
+### **Docker Container Hardening**
+- Base image: `python:3.13-slim`. Pre-installs Playwright Chromium dependencies (`RUN playwright install --with-deps chromium`).
+- Mounts named volume `chroma_data` for persistent vector storage.
+
+---
+
+## Slide 11: Phase 9 — Dual-Provider Split & LLM Pool Hardening
+
+### **The 429 Rate-Limit Collapse & Dual-Provider Architecture**
+- **Problem**: Gemini free tier (~20 req/day) exhausted on single reports. Groq free tier hit per-minute token limits on long histories.
+- **Solution**:
+  - **`/ask`**: Uses **Groq (Llama-3.3-70B)** (generous free RPM).
+  - **`/report` Phase A (Explore)**: Uses **Groq** for high-burst ReAct tool calls.
+  - **`/report` Phase B (Synthesis)**: Uses **Google Gemini (2.5-Flash)** via native `response_schema`.
+
+```
+        ┌─────────────────────────────────────────────────────────┐
+        │                    WORKLOAD ROUTER                      │
+        └───────────┬─────────────────────────────────┬───────────┘
+                    │                                 │
+                    ▼                                 ▼
+   ┌─────────────────────────────────┐   ┌─────────────────────────┐
+   │          GROQ DRIVER            │   │      GEMINI DRIVER      │
+   │       (Llama-3.3-70B)           │   │     (Gemini 2.5 Flash)  │
+   │ • Fast /ask Q&A                 │   │ • Final Report Eval     │
+   │ • ReAct Explore Loop (≤5 steps) │   │   Synthesis             │
+   │ • Persona Panel Nodes           │   │ • Native Schema JSON    │
+   └─────────────────────────────────┘   └─────────────────────────┘
+```
+
+### **LLM Resilience Pool (`app/agent/llm_pool.py`)**
+- Multi-provider chain across NVIDIA NIM (`GLM-5.2` $\rightarrow$ `DeepSeek-V4-Pro` $\rightarrow$ `Nemotron-3-Ultra`).
+- Differentiates per-minute 429s (sleep Retry-After) from per-day quota caps (15-min circuit breaker). Handles HTTP 400 DEGRADED & 404 container cold-scaling.
+
+---
+
+## Slide 12: Technical Trade-Offs & Decision Matrix
+
+| Domain | Option Selected | Alternative Considered | Technical Rationale |
+| :--- | :--- | :--- | :--- |
+| **Chunking** | **Custom Paragraph Chunker** | LangChain `RecursiveCharacterTextSplitter` | Preserves paragraph boundaries (`\n\n`), cuts dependency bloat, binds headings & CTAs. |
+| **Retrieval** | **Hybrid RRF + Reranker** | Dense Vector Only | Vectors handle semantic intent; BM25 handles proper nouns/acronyms (`SOC2`). Reranker rescores fused hits. |
+| **LLM Execution** | **Dual-Provider Split** | Single LLM Provider | Groq absorbs high-burst tool calls; Gemini provides type-safe final JSON via `response_schema`. |
+| **ReAct Loop** | **Capped at 5 Steps** | High/Unlimited Steps (12-20) | Bounds token cost & latency; forces high-signal exploration (`list` $\rightarrow$ `read` $\rightarrow$ `search`). |
+| **Rerank Scaling** | **Shifted Sigmoid** | Raw Logits / Linear Min-Max | Re-centers raw NVIDIA logits ($[-20, +5]$) so relevant items map above $0.30$. |
+| **Verification** | **Fail-Closed Retrieval, Fail-Open Judge** | Uniform Strategy | Refuses Q&A on low relevance (trust); ships report with caveat if judge fails (availability). |
+
+---
+
+## Slide 13: Presentation Summary & Demo Verification
+
+### **Summary of System Achievements**
+1. **Production-Grade Reliability**: Multi-LLM pool surviving rate limits, 400 DEGRADED errors, & container cold-scaling.
+2. **Zero-Hallucination Grounding**: 5-layer verification stack guaranteeing backed claims and verified citations.
+3. **JS-Hydrated Execution**: Automated escalation to Playwright Chromium for single-page applications.
+4. **Multi-Channel Delivery**: FastAPI REST, live SSE event dashboard, Netlify static HTML publishing, PDF generation, and stdio MCP server.
+
+### **Live Presentation Commands**
+- **Run API Server**: `uv run uvicorn app.main:app --reload`
+- **Test Suite**: `uv run python -m pytest tests/ -q` (All 85 offline tests pass)
+- **Run MCP Server**: `uv run python -m app.mcp_server`
+- **Render Web Deliverables**: `python -m web.render_report` & `python -m web.deploy`
+
+---
+  </script>
+
+  <!-- Presentation App Logic -->
+  <script>
+    document.addEventListener("DOMContentLoaded", function() {
+      const rawMarkdown = document.getElementById("markdown-source").textContent;
+      
+      // Parse markdown by '---' slide separators
+      const slideRawTexts = rawMarkdown.split(/^---$/m).map(s => s.trim()).filter(Boolean);
+      
+      // Remove header title slide metadata if present
+      const slideTexts = slideRawTexts.slice(1); // Drop the top header banner
+
+      const wrapper = document.getElementById("slides-wrapper");
+      const grid = document.getElementById("overview-grid");
+
+      marked.use({ gfm: true, breaks: true });
+
+      // Render each slide
+      slideTexts.forEach((slideMd, index) => {
+        const slideHtml = marked.parse(slideMd);
+
+        // Main slide container
+        const slideDiv = document.createElement("div");
+        slideDiv.className = `slide-card ${index === 0 ? 'active' : ''} bg-[#111827] border border-slate-800 rounded-2xl p-6 sm:p-10 shadow-2xl overflow-y-auto`;
+        slideDiv.dataset.slideIndex = index;
+        slideDiv.innerHTML = `<div class="prose-slide flex-1">${slideHtml}</div>`;
+        wrapper.appendChild(slideDiv);
+
+        // Overview Grid Thumbnail
+        const thumbDiv = document.createElement("div");
+        thumbDiv.className = `bg-slate-900 border ${index === 0 ? 'border-indigo-500' : 'border-slate-800'} hover:border-indigo-400 rounded-xl p-4 cursor-pointer transition-all flex flex-col justify-between h-48 overflow-hidden text-xs`;
+        thumbDiv.innerHTML = `
+          <div>
+            <div class="text-[10px] font-bold text-indigo-400 uppercase tracking-wider mb-1">Slide ${index + 1}</div>
+            <div class="prose-slide line-clamp-5 text-[11px]">${slideHtml}</div>
+          </div>
+          <div class="text-[10px] text-slate-500 font-semibold mt-2">Click to jump →</div>
+        `;
+        thumbDiv.addEventListener("click", () => {
+          goToSlide(index);
+          toggleGrid(false);
+        });
+        grid.appendChild(thumbDiv);
+      });
+
+      let currentSlide = 0;
+      const totalSlides = slideTexts.length;
+
+      const prevBtn = document.getElementById("prev-btn");
+      const nextBtn = document.getElementById("next-btn");
+      const counter = document.getElementById("slide-counter");
+      const progressBar = document.getElementById("progress-bar");
+      const gridOverlay = document.getElementById("overview-grid");
+
+      function updateSlideUI() {
+        // Toggle slide active state
+        document.querySelectorAll(".slide-card").forEach((card, idx) => {
+          if (idx === currentSlide) {
+            card.classList.add("active");
+          } else {
+            card.classList.remove("active");
+          }
+        });
+
+        // Update Counter & Progress Bar
+        counter.innerText = `Slide ${currentSlide + 1} of ${totalSlides}`;
+        const pct = ((currentSlide + 1) / totalSlides) * 100;
+        progressBar.style.width = pct + "%";
+
+        // Enable / Disable Prev-Next
+        prevBtn.disabled = currentSlide === 0;
+        nextBtn.disabled = currentSlide === totalSlides - 1;
+
+        // Apply syntax highlighting
+        const activeCard = document.querySelector(`.slide-card[data-slide-index="${currentSlide}"]`);
+        if (activeCard) {
+          activeCard.querySelectorAll('pre code').forEach((block) => {
+            hljs.highlightElement(block);
+          });
+        }
+      }
+
+      function goToSlide(n) {
+        if (n >= 0 && n < totalSlides) {
+          currentSlide = n;
+          updateSlideUI();
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+      }
+
+      function toggleGrid(forceState) {
+        const isHidden = gridOverlay.classList.contains("hidden");
+        const show = forceState !== undefined ? forceState : isHidden;
+
+        if (show) {
+          gridOverlay.classList.remove("hidden");
+          wrapper.classList.add("hidden");
+        } else {
+          gridOverlay.classList.add("hidden");
+          wrapper.classList.remove("hidden");
+        }
+      }
+
+      // Event Listeners
+      prevBtn.addEventListener("click", () => goToSlide(currentSlide - 1));
+      nextBtn.addEventListener("click", () => goToSlide(currentSlide + 1));
+      document.getElementById("toggle-grid-btn").addEventListener("click", () => toggleGrid());
+
+      // Keyboard Controls
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "ArrowRight" || e.key === "Space" || e.key === "PageDown") {
+          e.preventDefault();
+          goToSlide(currentSlide + 1);
+        } else if (e.key === "ArrowLeft" || e.key === "PageUp") {
+          e.preventDefault();
+          goToSlide(currentSlide - 1);
+        } else if (e.key === "o" || e.key === "O") {
+          e.preventDefault();
+          toggleGrid();
+        } else if (e.key === "Home") {
+          e.preventDefault();
+          goToSlide(0);
+        } else if (e.key === "End") {
+          e.preventDefault();
+          goToSlide(totalSlides - 1);
+        }
+      });
+
+      // Initial UI update
+      updateSlideUI();
+    });
+  </script>
+</body>
+</html>
