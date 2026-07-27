@@ -31,3 +31,10 @@ CLAUDE.md
 
 # netlify deploy cache
 .netlify/
+
+# Local presentation, html visualizers, & personal guide docs
+understand.html
+changelog.html
+presentation.html
+PRESENTATION.md
+ppt.md
