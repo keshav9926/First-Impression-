@@ -2,7 +2,9 @@
 
 > **Master Slide Deck & Technical Blueprint**  
 > *Comprehensive 19-Topic Technical Deep-Dive*  
-> **Target Audience**: Technical Mentors, System Architects, & Engineering Evaluation Panels
+> **Author**: ~ Keshav Kakani  
+> **GitHub Repository**: [github.com/keshav9926/First-Impression-](https://github.com/keshav9926/First-Impression-)  
+> **Live Demos**: [Vortexify Report](https://firstimpressione.netlify.app/vortexify) | [KAINest Report](https://firstimpressione.netlify.app/kainest)
 
 ---
 
@@ -11,13 +13,13 @@
 ### **First Impression Engine (FIE)**
 *Autonomous Outside-In Product Analysis & Grounded Multi-Agent Evaluation Platform*
 
-- **Core Problem**: Founders and product teams suffer from the *curse of knowledge*—they cannot experience their own public site as an uninitiated stranger. Traditional tools audit SEO or page speed, but miss product clarity, value propositions, and UX friction.
-- **Solution**: An autonomous agentic platform that crawls public landing pages, ingests visual & text content into ChromaDB, executes ReAct exploration loops, and evaluates product presentation through a multi-persona panel.
-- **Key System Capabilities**:
-  - **Fail-Closed Compliance**: Strict `robots.txt` gate & public-data-only constraint.
-  - **Multimodal Visual Intelligence**: NVIDIA VLM vision captioning for dashboard UI screenshots (`nemotron-3-nano-omni-30b`).
-  - **Zero-Hallucination Pipeline**: 5-layer trust verification stack guaranteeing backed claims and canonical URL citations.
-  - **Multi-Channel Delivery**: FastAPI REST API, live SSE event bus, FastMCP stdio server, Netlify static web publishing, and automated PDF datasheets.
+- **Author**: ~ Keshav Kakani
+- **GitHub Repository**: [https://github.com/keshav9926/First-Impression-](https://github.com/keshav9926/First-Impression-)
+- **Live Deployed Reports**:
+  - **Vortexify Report**: [firstimpressione.netlify.app/vortexify](https://firstimpressione.netlify.app/vortexify)
+  - **KAINest Report**: [firstimpressione.netlify.app/kainest](https://firstimpressione.netlify.app/kainest)
+- **Core Problem**: Founders suffer from the *curse of knowledge*—they cannot experience their own public site as an uninitiated stranger. Traditional tools audit SEO or page speed, but miss product clarity, value propositions, and UX friction.
+- **Solution**: Autonomous agentic platform crawling public landing pages, ingesting visual & text content into ChromaDB, executing ReAct loops, and evaluating product presentation through a multi-persona panel.
 
 ---
 
@@ -154,7 +156,7 @@
 | **Ranking Quality & Calibration** | Uncalibrated distance | Unbounded BM25 score | **Shifted Sigmoid ($\ge 0.30$)** |
 
 #### **The Core Rationale**
-Single-retrieval strategies fail under real-world website evaluation. Hybrid retrieval combines the conceptual semantic breadth of dense vectors with the pinpoint exactness of sparse BM25, bounded by neural cross-encoder reranking and relevance gating.
+Single-retrieval strategies fail under real-world website evaluation. Hybrid retrieval combines conceptual semantic breadth with exact keyword matching, bounded by neural reranking.
 
 ---
 
@@ -166,8 +168,8 @@ Single-retrieval strategies fail under real-world website evaluation. Hybrid ret
   1. Receives user query string and target `company` identifier.
   2. Executes Hybrid Retrieval (`pipeline.retrieve(query, company, top_k=5)`).
   3. Evaluates top chunk relevance score against calibrated threshold ($S_{\text{norm}} \ge 0.30$).
-  4. **Fail-Closed Threshold Gate**: If highest score is below $0.30$, returns a clear refutation response: *"Insufficient evidence found in public domain pages to answer this question accurately."*
-  5. If relevance is sufficient, passes retrieved chunks + explicit prompt instructions to LLM to synthesize a grounded answer.
+  4. **Fail-Closed Threshold Gate**: If highest score is below $0.30$, returns refutation: *"Insufficient evidence found in public domain pages to answer this question accurately."*
+  5. If relevance is sufficient, passes retrieved chunks + prompt instructions to LLM for answer synthesis.
   6. Attaches canonical source URLs to every answer sentence.
 
 ---
@@ -175,7 +177,7 @@ Single-retrieval strategies fail under real-world website evaluation. Hybrid ret
 ## Slide 9: ReAct Agent
 
 ### **Reason + Act + Observe Autonomous Exploration (`app/agent/react.py`)**
-- **Architecture**: A hand-rolled ReAct agent loop that autonomously investigates an ingested domain prior to report generation.
+- **Architecture**: Hand-rolled ReAct agent loop autonomously investigating an ingested domain prior to report generation.
 - **Execution Loop**:
   ```
   Loop (Max 40 Steps):
@@ -185,7 +187,7 @@ Single-retrieval strategies fail under real-world website evaluation. Hybrid ret
     4. Tool Observation appended to Agent Context History.
     5. Repeat until LLM emits Final Answer or reaches step cap.
   ```
-- **Bounded History Management (`_trim_history`)**: Prevents $O(N^2)$ token explosion during multi-step tool calls by keeping recent observations verbatim while trimming older tool outputs to 600 characters. Includes a **Repeat-Call Guard** to halt infinite looping on duplicate tool parameters.
+- **Bounded History Management (`_trim_history`)**: Prevents $O(N^2)$ token explosion by keeping recent observations verbatim while trimming older tool outputs to 600 characters. Includes a **Repeat-Call Guard** to halt duplicate parameter loops.
 
 ---
 
@@ -198,7 +200,7 @@ Single-retrieval strategies fail under real-world website evaluation. Hybrid ret
    - *Behavior*: Returns all canonical crawled URLs, page title headers, HTTP status codes, and character counts. Gives the agent a high-level site map.
 2. **`read_page`**:
    - *Inputs*: `company`, `url`
-   - *Behavior*: Fetches clean extracted body text of a specific URL. Capped at 4,000 characters. Prepends extracted AST Headings (`h1..h3`), navbar CTAs, and VLM visual screenshot captions to the top of the observation.
+   - *Behavior*: Fetches clean extracted body text of a specific URL. Capped at 4,000 characters. Prepends AST Headings (`h1..h3`), navbar CTAs, and VLM visual screenshot captions to the top of the observation.
 3. **`search_content`**:
    - *Inputs*: `company`, `query`, `top_k`
    - *Behavior*: Runs full Hybrid Retrieval (Dense Vector + BM25 + RRF + Neural Reranker) over ingested store. Returns top matching text chunks with relevance scores and source URLs.
@@ -208,24 +210,24 @@ Single-retrieval strategies fail under real-world website evaluation. Hybrid ret
 ## Slide 11: Prompt Engineering
 
 ### **System Prompts & Strict Output Guarantees (`app/agent/prompts.py`)**
-- **Exploration System Prompt**: Commands the ReAct agent to adopt a systematic discovery mindset—exploring pricing, features, security, documentation, and about/team pages.
-- **Synthesis Prompt**: Directs the LLM to synthesize structured JSON adhering strictly to the `FirstImpressionReport` Pydantic model.
+- **Exploration System Prompt**: Commands the ReAct agent to adopt a systematic discovery mindset—exploring pricing, features, security, documentation, and team pages.
+- **Synthesis Prompt**: Directs LLM to synthesize structured JSON adhering strictly to `FirstImpressionReport` Pydantic model.
 - **Key Prompt Rules**:
-  - **No Unbacked Knowledge**: Forces LLM to rely *exclusively* on tool-returned observations.
-  - **Verbatim Source URL Binding**: Every observation object must include an explicit `source_url` field pointing to a real URL returned in the exploration phase.
-  - **Tolerant JSON Parsing (`llm_pool.py`)**: Strips reasoning `<think>` tags emitted by DeepSeek models and uses balanced-brace extraction to handle markdown codeblock wrappers.
+  - **No Unbacked Knowledge**: LLM relies *exclusively* on tool-returned observations.
+  - **Verbatim Source URL Binding**: Observation objects must include explicit `source_url` pointing to real URLs returned during exploration.
+  - **Tolerant JSON Parsing (`llm_pool.py`)**: Strips reasoning `<think>` tags and uses balanced-brace extraction.
 
 ---
 
 ## Slide 12: Report Orchestrator
 
 ### **Central Workflow Engine (`app/agent/report.py`)**
-- **Function**: `generate_report(company, url)` orchestrates the end-to-end multi-phase report synthesis process.
+- **Function**: `generate_report(company, url)` orchestrates the multi-phase synthesis process.
 - **Execution Phases**:
   1. **Phase A (ReAct Exploration)**: Runs `run_react_loop()` to gather domain evidence.
-  2. **Phase B (Parallel Persona Panel)**: Invokes `run_persona_panel()` to evaluate shared evidence across 3 reviewer perspectives.
-  3. **Phase C (Report Synthesis)**: Calls LLM pool with combined exploration state + persona outputs to build draft `FirstImpressionReport`.
-  4. **Phase D (5-Layer Guard Stack)**: Executes schema validation, citation URL checking, LLM fact-check judge pass, and scope caveat enforcement.
+  2. **Phase B (Parallel Persona Panel)**: Invokes `run_persona_panel()` to evaluate evidence across 3 perspectives.
+  3. **Phase C (Report Synthesis)**: Calls LLM pool with evidence + persona outputs to build draft report.
+  4. **Phase D (5-Layer Guard Stack)**: Executes schema validation, citation check, LLM fact-check judge pass, and scope caveat enforcement.
   5. **Phase E (Deliverable Export)**: Returns clean report object for JSON response, HTML dashboard rendering, or PDF compilation.
 
 ---
@@ -238,7 +240,7 @@ Single-retrieval strategies fail under real-world website evaluation. Hybrid ret
   1. **Technical Evaluator**: Senior/Staff Engineer looking for API docs completeness, SDKs, authentication, security compliance (SOC 2), integration friction, and system reliability.
   2. **Business Buyer**: Founder or PM evaluating pricing transparency, ROI, customer logos, case studies, social proof, and business value.
   3. **First-Time End User**: Non-technical visitor assessing initial onboarding clarity, simplicity, getting started guides, and immediate value proposition.
-- **Parallel Fan-Out**: Runs persona prompts in parallel over shared evidence base, storing impressions into a unified panel verdict dictionary.
+- **Parallel Fan-Out**: Runs persona prompts in parallel over shared evidence base.
 
 ---
 
@@ -282,7 +284,7 @@ Single-retrieval strategies fail under real-world website evaluation. Hybrid ret
 └─────────────────────────────────────────────────────────────┘
 ```
 
-- **Prompt Injection Defense (`app/ingestion/sanitize.py`)**: Strips instruction-shaped regex patterns (`ignore previous instructions`, `you are an AI`) from scraped site text before chunking.
+- **Prompt Injection Defense (`app/ingestion/sanitize.py`)**: Strips instruction-shaped regex patterns before chunking.
 
 ---
 
@@ -308,7 +310,7 @@ Single-retrieval strategies fail under real-world website evaluation. Hybrid ret
 - **Circuit Breaker Pattern**:
   - `_DAILY_COOLDOWN = 900s` (15 min): Benches endpoints returning HTTP 400 DEGRADED deployment errors or rate-limits (429s).
   - `_TRANSIENT_COOLDOWN = 60s`: Handles temporary 503 service unavailable or 404 container cold-start scaling.
-- **Failover Guarantee**: Automatically retries failed LLM requests against next healthy provider in pool, eliminating downtime during third-party API outages.
+- **Failover Guarantee**: Automatically retries failed LLM requests against next healthy provider.
 
 ---
 
@@ -341,8 +343,8 @@ Single-retrieval strategies fail under real-world website evaluation. Hybrid ret
 
 ### **Key Technical Innovations & System Comebacks**
 
-1. **JS SPA Black Hole Fix**: Replaced static extraction with automated Playwright Chromium auto-scrolling (`render.py`), jumping text extraction from **368 chars $\rightarrow$ 1,706 chars** on JavaScript SPAs.
-2. **CTA Erasure Recovery**: Solved `trafilatura` button removal by building AST CTA Collectors (`_CtaCollector`) that attach primary buttons directly to chunk metadata.
+1. **JS SPA Black Hole Fix**: Replaced static extraction with Playwright Chromium auto-scrolling (`render.py`), jumping text extraction from **368 chars $\rightarrow$ 1,706 chars** on JavaScript SPAs.
+2. **CTA Erasure Recovery**: Solved `trafilatura` button removal by building AST CTA Collectors (`_CtaCollector`) attaching primary buttons to chunk metadata.
 3. **RRF Consensus Fix**: Fixed standard RRF dropping #1 vector search results by implementing **Guaranteed Seats (`guaranteed_per_list = 3`)** in `fusion.py`.
 4. **Resilient LLM Pool**: Built circuit-breaker failover pool handling HTTP 400 DEGRADED errors and rate-limits across NVIDIA NIM models without crashing report execution.
 5. **Zero-Code-Drift MCP Server**: Built stdio FastMCP server (`mcp_server.py`) delegating directly to core FastAPI pipeline functions.
