@@ -1,29 +1,11 @@
-# app/agent/llm_pool.py — one chat() over the NVIDIA failover chain.
-#
-# WHY: the agent's bursty, many-call workload needs headroom and resilience —
-# any one model can be down, throttled, or return junk. All four NVIDIA models
-# speak the OpenAI chat.completions dialect, so one call-site can prefer one and
-# fail over down the chain:
-#   - per-MINUTE 429  → sleep the server's Retry-After, same provider
-#   - per-DAY 429     → sleeping won't help TODAY → switch provider immediately
-#     (and trip the circuit breaker so we stop re-probing it this run)
-#   - 5xx / blank completion → transient → retry then fail over
-#   - tool_use_failed 400 → stochastic malformed tool-call syntax → re-ask
-#
-# THE CHAIN (see _PROVIDERS): the finalized NVIDIA quality models, one nvapi key
-# over integrate.api.nvidia.com:  glm → dspro → nemo → mistral.
-# Callers pass prefer=settings.pool_prefer ("glm").
-#
-# NVIDIA-ONLY (2026-07-18): Gemini/Groq were removed from this pool — testing is
-# standardized on NVIDIA. Their API keys stay in .env (config still reads them)
-# so the providers can be re-added later; this module simply no longer routes to
-# them. Because all four models share ONE account quota, a daily cap can trip
-# them together — if that becomes a problem, re-introduce a different-key
-# provider here as deep fallback.
-#
-# CALL FLOW:
-#   groq_driver.explore()/synthesize() / panel._judge_as() / judge.verify_groundedness()
-#     → chat(messages, prefer=..., tools=/response_format=...)
+"""
+===============================================================================
+FILE: app/agent/llm_pool.py
+ORIGIN      : app.agent.react / app.agent.report / app.evals
+PURPOSE     : Resilience pool for LLM API calls with multi-model failover & circuit breaker
+DESTINATION : NVIDIA NIM API / OpenAI SDK endpoint integrations
+===============================================================================
+"""
 
 import contextlib
 import contextvars

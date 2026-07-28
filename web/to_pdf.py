@@ -1,13 +1,11 @@
-# web/to_pdf.py — render a report page (web/dist/<key>.html) to PDF.
-#
-# Google Drive stopped serving HTML as web pages in 2016, so an .html upload
-# shows a download screen, not the report. A PDF previews cleanly in Drive and
-# shares as a normal link — and the datasheet design is print-first, so the PDF
-# looks the same as the page. Playwright loads the file, lets the JS run (score
-# count-up, meters, decorative canvas settle at their final state), then prints.
-#
-# Usage: python -m web.to_pdf            (every web/dist/*.html)
-#        python -m web.to_pdf vortexify  (one)
+"""
+===============================================================================
+FILE: web/to_pdf.py
+ORIGIN      : CLI execution / Build Automation
+PURPOSE     : Playwright Chromium headless rendering to convert HTML reports (web/dist/) into PDFs
+DESTINATION : web/dist/<key>.pdf (Shareable PDF datasheet artifact)
+===============================================================================
+"""
 
 import sys
 from pathlib import Path

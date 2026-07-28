@@ -1,10 +1,11 @@
-# app/agent/prompts.py — the agent's instructions, shared across LLM providers.
-#
-# These live in their own module (not in a driver) because BOTH the Gemini
-# driver and the Groq driver must use the identical exploration and synthesis
-# instructions — otherwise the two providers would produce reports of different
-# character and the "swap providers" story would be a lie. Same prompts, same
-# behavior, different backend.
+"""
+===============================================================================
+FILE: app/agent/prompts.py
+ORIGIN      : app.agent.react (run_react_loop) / app.agent.report (generate_report)
+PURPOSE     : Prompt engineering templates for ReAct exploration and structured report synthesis
+DESTINATION : app.agent.llm_pool (Injected into LLM context window)
+===============================================================================
+"""
 
 EXPLORE_SYSTEM = """\
 You are a sharp, curious product analyst helping a startup's founders see their \

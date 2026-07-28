@@ -1,18 +1,11 @@
-# app/ingestion/robots.py — robots.txt compliance (hard rule #1: public data only).
-# Before ANY page is fetched, this module checks whether the site's robots.txt
-# allows our user agent to access that URL. robots.txt is the standard file
-# where site owners declare which paths crawlers may and may not visit.
-#
-# CALL FLOW:
-#   main.py: ingest()      → is_allowed(seed_url)   (rejects the request with 403 if refused)
-#   fetcher.py: crawl()    → is_allowed(every_url)  (skips disallowed pages mid-crawl)
-#
-# Design choices worth explaining:
-# - Parsers are cached per site so we download robots.txt once, not per page.
-# - If robots.txt can't be retrieved due to a network error, we choose the
-#   CONSERVATIVE (fail-closed) interpretation: treat the site as off-limits.
-#   (A missing robots.txt (404) is different — the standard says that means
-#   "allow all", and the stdlib parser already handles that case.)
+"""
+===============================================================================
+FILE: app/ingestion/robots.py
+ORIGIN      : app.main (POST /ingest) / app.ingestion.fetcher (crawl_site)
+PURPOSE     : Politeness guard validating site crawl permission via robots.txt
+DESTINATION : app.ingestion.fetcher (Proceed with crawl or abort URL)
+===============================================================================
+"""
 
 import time
 from urllib.parse import urlparse

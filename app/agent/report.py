@@ -1,17 +1,11 @@
-# app/agent/report.py — the report entry point + guards.
-#
-# generate_report() returns (FirstImpressionReport, steps_log, pages_examined).
-# The report pipeline is NVIDIA-only (2026-07-18): both paths run on the pool
-# (agent/groq_driver.py over settings.pool_prefer, the GLM-led NVIDIA chain).
-#   panel=False → groq_driver.generate()  (single-agent explore → synthesize)
-#   panel=True  → agent/panel.py run_panel() (three personas over one explore)
-#
-# EXPLORE (free-form ReAct) then SYNTHESIZE (schema-constrained JSON) is the
-# shape in both. apply_guards() then runs the shared safety pass (citation
-# verification → groundedness judge → thin-extraction caveat).
-#
-# CALL FLOW:
-#   main.py report() → generate_report() → groq_driver.generate() / run_panel()
+"""
+===============================================================================
+FILE: app/agent/report.py
+ORIGIN      : app.main (POST /report) / app.mcp_server (analyze_site)
+PURPOSE     : Orchestrates ReAct exploration, persona panel synthesis, and safety guard enforcement
+DESTINATION : app.schemas (Returns validated FirstImpressionReport)
+===============================================================================
+"""
 
 from app import observability
 from app.agent import grounding, groq_driver, judge, llm_pool

@@ -1,23 +1,11 @@
-# app/agent/tools.py — the agent's three tools + their Gemini schemas.
-#
-# These are thin wrappers over machinery we already built — the agent doesn't
-# get new powers, it gets the ABILITY TO CHOOSE which existing capability to
-# use next. That choice, made by the model each step, is what makes this an
-# agent rather than a pipeline.
-#
-#   list_pages()      → distinct URLs in the store   (survey the territory)
-#   read_page(url)    → full text of one page        (read like a user)
-#   search_content(q) → the Phase 2 hybrid funnel    (targeted questions)
-#
-# CALL FLOW:
-#   react.py loop → execute_tool(name, args) → one of the _impl functions
-#   Each returns a plain STRING — that string becomes the "observation" fed
-#   back to the model as a function response. Tools never raise for "not
-#   found"; they return a helpful message so the model can recover and re-plan
-#   (a raised exception would just kill the loop).
-#
-# FUNCTION_DECLARATIONS is the schema list handed to Gemini so it knows what
-# tools exist and how to call them (name, description, parameters).
+"""
+===============================================================================
+FILE: app/agent/tools.py
+ORIGIN      : app.agent.react (run_react_loop)
+PURPOSE     : ReAct Agent tool registry definitions (list_pages, read_page, search_content)
+DESTINATION : app.rag.store / app.rag.pipeline (Queries underlying RAG indices)
+===============================================================================
+"""
 
 import json
 import logging

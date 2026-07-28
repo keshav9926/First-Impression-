@@ -1,30 +1,26 @@
-# app/schemas.py — Pydantic models defining the API's request/response shapes.
-#
-# WHERE THESE ARE USED:
-#   IngestRequest / IngestResponse → main.py ingest()  (POST /ingest)
-#   AskRequest / AskResponse       → main.py ask()     (POST /ask)
-#   Source                         → nested inside AskResponse
-#   Observation / FirstImpressionReport / ReportResponse
-#                                  → main.py report()  (POST /report, Phase 3)
-#                                    AND agent/report.py as the Gemini
-#                                    response_schema (structured output).
-#
-# FastAPI uses these to (a) reject malformed requests with a 422 before our
-# code runs, (b) guarantee responses match the declared shape, and (c) render
-# the /docs page. Field(...) constraints are validation RULES, not comments —
-# max_pages=999 is rejected by the framework; our code never sees it.
+"""
+===============================================================================
+FILE: app/schemas.py
+ORIGIN      : FastAPI routes (app.main) / Synthesis LLM (app.agent.report)
+PURPOSE     : Strict Pydantic data validation schemas for HTTP API payloads & JSON reports
+DESTINATION : FastAPI serialization layer / OpenAPI docs / Frontend UI
+===============================================================================
+"""
 
 from pydantic import BaseModel, Field, HttpUrl
 
 
 class IngestRequest(BaseModel):
-    """Body of POST /ingest — what site to crawl and how far.
+    """
+    POST /ingest Request Payload
 
-    Validated by FastAPI before main.ingest() runs.
+    ORIGIN      : HTTP client / Web UI
+    PURPOSE     : Validates website target URL and crawl depth parameters.
+    DESTINATION : Handed to app.main.ingest() -> app.ingestion.crawler.crawl_site()
     """
 
-    url: HttpUrl  # HttpUrl (not str) = must parse as a valid http(s) URL
-    max_pages: int = Field(default=15, ge=1, le=300)  # ge/le = min/max allowed
+    url: HttpUrl
+    max_pages: int = Field(default=15, ge=1, le=300)
 
 
 class IngestResponse(BaseModel):

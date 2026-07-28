@@ -1,35 +1,11 @@
-# app/observability.py — Phase 8: Langfuse tracing, following the official
-# Langfuse instrumentation best-practices (github.com/langfuse/skills).
-#
-# Same philosophy as events.py: a HARD no-op unless configured. With both
-# LANGFUSE_* keys set, each report run is ONE trace — a span tree whose LLM
-# calls are captured as proper `generation` observations (model, tokens, cost,
-# latency) by the Langfuse OpenAI drop-in, with the persona subagents typed as
-# `agent` and retrieval typed as `retriever` so the trace reads correctly and
-# drives Langfuse's Agent Graph.
-#
-# WHY the drop-in over manual logging: Langfuse's baseline guidance is "prefer
-# framework integrations over manual instrumentation — they capture more context
-# with less code." Our OpenAI-compatible providers (NVIDIA GLM/DeepSeek/Nemotron/
-# Mistral + Gemini) all go through openai.OpenAI, so swapping that class for
-# langfuse.openai.OpenAI auto-instruments every generation. Only Groq (its own
-# SDK, deep fallback) is logged manually.
-#
-# ONE Langfuse client: we construct it here, which also registers it as the SDK
-# default singleton the drop-in resolves via get_client() — so the drop-in's
-# generations nest under the spans we open here (shared OpenTelemetry context).
-#
-# DESIGN RULES:
-#   1. Observability must NEVER break a report — every Langfuse call is wrapped.
-#   2. Import Langfuse only AFTER config is loaded, and construct the client
-#      BEFORE any langfuse.openai client is built (drop-in patch order).
-#
-# CALL FLOW:
-#   report.generate_report()  → with report_trace(...) as trace: ...
-#   llm_pool._client()        → openai_client_class() (drop-in when enabled)
-#   llm_pool.chat()           → passes name=/metadata= so each generation is named
-#   panel persona node        → with span(name, as_type="agent"): ...
-#   rag.pipeline.retrieve()   → with span("retrieve-context", as_type="retriever")
+"""
+===============================================================================
+FILE: app/observability.py
+ORIGIN      : FastAPI routes / Agent report workflow / RAG execution
+PURPOSE     : Telemetry and tracing integration via Langfuse (spans & generations)
+DESTINATION : Langfuse Cloud / Local logs
+===============================================================================
+"""
 
 import logging
 import os

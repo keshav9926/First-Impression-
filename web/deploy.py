@@ -1,21 +1,11 @@
-# web/deploy.py — publish the rendered report pages to a real, non-claude link.
-#
-# One-time setup (you, once):
-#   1. Create a free Netlify account: https://app.netlify.com
-#   2. User settings → Applications → Personal access tokens → New token.
-#      Put it in .env:              NETLIFY_AUTH_TOKEN=nfp_xxx
-#   3. Add a site (Add new site → any name, or drag web/dist once). Open the
-#      site → Site configuration → copy the "Site ID", put it in .env:
-#                                   NETLIFY_SITE_ID=xxxxxxxx-....
-#
-# Then, any time — I run:
-#   python -m web.deploy                 # deploy every web/dist/*.html
-# and it prints the public link for each report. Rendered pages are static, so
-# each link just serves that founder's report; nothing is indexed.
-#
-# Cross-company privacy: reports share one site, so links look like
-# <site>.netlify.app/<company>.html. Pass --slug to add a random suffix
-# (<company>-9f3a2k.html) so one founder's link can't be used to guess another's.
+"""
+===============================================================================
+FILE: web/deploy.py
+ORIGIN      : CLI execution / Deployment script
+PURPOSE     : Publishes static HTML report artifacts (web/dist/) to Netlify platform
+DESTINATION : Netlify Production Edge CDN endpoints (Public share links)
+===============================================================================
+"""
 
 import os
 import re

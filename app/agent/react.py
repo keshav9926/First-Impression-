@@ -1,26 +1,11 @@
-# app/agent/react.py — the hand-rolled ReAct loop (Reason + Act).
-#
-# This is the heart of "agentic": instead of a fixed pipeline, the model
-# DECIDES each step what to do next, we DO it, the model OBSERVES the result,
-# and it decides again — until it stops asking for tools.
-#
-#   ┌───────────────────────────────────────────────┐
-#   │  model reasons → emits function_call(s)        │  (Reason + Act)
-#   │  we run execute_tool() → observation string    │  (Act)
-#   │  observation appended to history               │  (Observe)
-#   │  loop, until model emits TEXT instead of a call │
-#   └───────────────────────────────────────────────┘
-#
-# We use Gemini's MANUAL function calling (automatic calling disabled) so the
-# loop is visible and logged — the whole point is to SEE the ReAct cycle, not
-# hide it behind SDK magic. Built by hand on purpose; Phase 4 brings LangGraph
-# in only when MULTI-agent orchestration genuinely needs it.
-#
-# CALL FLOW:
-#   report.py generate_report() → run_react_loop(client, model, contents, config, max_steps)
-#     └── per step: client.generate_content → tools.execute_tool → append observation
-#   Returns the full conversation `contents` (which report.py then reuses for
-#   the schema-constrained synthesis call) plus a log of what the agent did.
+"""
+===============================================================================
+FILE: app/agent/react.py
+ORIGIN      : app.agent.report (generate_report)
+PURPOSE     : Reason+Act (ReAct) iterative exploration loop for Gemini models
+DESTINATION : app.agent.tools (Executes tool calls & feeds back observations)
+===============================================================================
+"""
 
 from google.genai import types
 

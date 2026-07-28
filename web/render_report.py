@@ -1,18 +1,11 @@
-# web/render_report.py — turn a verified report JSON (reports/<key>.json) into
-# a standalone, shareable HTML page in the exact web/report.html design.
-#
-# HOW THE PIECES CONNECT:
-#   pipeline (deep run) -> reports/<key>.json      (FirstImpressionReport + meta)
-#   web/report.html     -> the design TEMPLATE     (all data read from `var REPORT`)
-#   this script         -> replaces the demo REPORT object with the real one
-#                          and writes web/dist/<key>.html
-#   hosting (GitHub Pages / Vercel / Netlify)      -> each file becomes a clean
-#                          link like https://<user>.github.io/fie/vortexify
-#
-# The founder receives a LINK, never a file. One static page per company,
-# zero backend at view time.
-# Usage: python -m web.render_report            (renders every reports/*.json)
-#        python -m web.render_report vortexify  (just one)
+"""
+===============================================================================
+FILE: web/render_report.py
+ORIGIN      : CLI execution / Build Automation
+PURPOSE     : Compiles JSON report objects into static, shareable HTML dashboards (web/dist/)
+DESTINATION : web/dist/<key>.html (Deployable static artifact for founders/reviewers)
+===============================================================================
+"""
 
 import json
 import re

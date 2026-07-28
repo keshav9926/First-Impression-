@@ -1,19 +1,11 @@
-# app/rag/embeddings.py — turns text into vectors via the Voyage AI API.
-#
-# CALL FLOW:
-#   main.py: ingest() → embed_documents(all_chunk_texts)  (ingestion side)
-#   main.py: ask()    → embed_query(question)             (question side)
-#   Both produce vectors that store.py saves or searches with.
-#
-# WHAT an embedding is: a list of ~1000 floats representing a text's MEANING
-# as a point in space. Texts with similar meaning land close together, so
-# "how much does it cost" retrieves the pricing paragraph even though the
-# page says "plans start at $20/mo" and shares no keywords with the question.
-#
-# WHY input_type matters: Voyage embeds documents and queries slightly
-# differently (a question and its answer should land NEAR each other even
-# though a question is not phrased like an answer). Passing the wrong type
-# silently degrades retrieval quality — a classic RAG bug.
+"""
+===============================================================================
+FILE: app/rag/embeddings.py
+ORIGIN      : app.main (ingest) / app.rag.pipeline (retrieve)
+PURPOSE     : Dense vector embedding generation via NVIDIA NIM / Voyage AI APIs
+DESTINATION : app.rag.store (Chroma vector persistence and vector kNN queries)
+===============================================================================
+"""
 
 import time
 

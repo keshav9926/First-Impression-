@@ -1,32 +1,11 @@
-# app/main.py — the FastAPI application entry point.
-# Defines the app object that Uvicorn serves and registers all endpoints.
-# Endpoints stay thin: validate → call the right module → shape the response.
-# The real logic lives in app/ingestion/ and app/rag/.
-#
-# CALL FLOW (the whole system, from this file's point of view):
-#
-#   POST /ingest → ingest()
-#       ├── _require_keys(voyage=True)         key present? else 503
-#       ├── robots.is_allowed(seed_url)        rule #1 gate → 403 if refused
-#       ├── fetcher.crawl(url, max_pages)      download + extract pages
-#       ├── chunker.chunk_text(page.text)      pages → chunks (per page)
-#       ├── embeddings.embed_documents(texts)  chunks → vectors (Voyage API)
-#       └── store.replace_all(chunks, vectors) save into Chroma
-#
-#   POST /ask → ask()   [Phase 2: hybrid retrieval funnel]
-#       ├── _require_keys(voyage=True, llm=True)
-#       ├── store.count()                      empty? → 409 "ingest first"
-#       ├── pipeline.retrieve(question)        embed → vector+BM25 → RRF → rerank
-#       ├── min_relevance gate                 all below bar? → refuse, skip LLM
-#       └── qa.answer(question, relevant)      LLM answers from chunks only
-#
-#   POST /report → report()   [Phase 3: the ReAct analysis agent]
-#       ├── key guards (Voyage + the configured agent_provider's key)
-#       ├── store.count()                      empty? → 409 "ingest first"
-#       └── generate_report()                  agent explores (list_pages /
-#                                              read_page / search_content) then
-#                                              synthesizes the cited report
-#                                              (provider: gemini or groq)
+"""
+===============================================================================
+FILE: app/main.py
+ORIGIN      : Uvicorn Server / Web Dashboard / API Consumers
+PURPOSE     : Primary FastAPI Application Entrypoint & HTTP Routing Layer
+DESTINATION : app.ingestion (crawler/fetcher) / app.rag (store/qa) / app.agent (report)
+===============================================================================
+"""
 
 import json
 import logging
@@ -66,6 +45,13 @@ app = FastAPI(
 
 
 def _require_keys(*, voyage: bool = False, llm: bool = False) -> None:
+    """
+    Validate Required API Keys
+
+    ORIGIN      : Route entrypoints (ingest, ask, report)
+    PURPOSE     : Ensure API keys are present in config before execution.
+    DESTINATION : Raises HTTP 503 if keys are missing.
+    """
     """Fail with a clear 503 if a needed API key isn't configured.
 
     Called by: ingest() and ask(), as their first line.

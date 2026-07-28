@@ -1,17 +1,11 @@
-# app/rag/store.py — the vector store (Chroma).
-# Chroma runs INSIDE our process and persists to a local folder — no separate
-# server. It stores (id, text, metadata, vector) rows and answers the one
-# query that matters for RAG: "give me the k stored vectors nearest to this
-# query vector" (nearest = most similar meaning).
-#
-# CALL FLOW:
-#   main.py: ingest() → replace_all(chunks, vectors)   save everything
-#   main.py: ask()    → count()                        anything ingested?
-#                     → search(query_vector, top_k)    find relevant chunks
-#   All three go through _collection() to open the same on-disk collection.
-#
-# Phase 1 simplification: one collection holding one company's docs;
-# re-ingesting replaces it. Multi-company support can come later.
+"""
+===============================================================================
+FILE: app/rag/store.py
+ORIGIN      : app.main (ingest) / app.rag.pipeline (retrieve)
+PURPOSE     : Embedded ChromaDB vector database manager for storing and querying text vectors
+DESTINATION : app.rag.pipeline (Returns vector kNN nearest neighbor search hits)
+===============================================================================
+"""
 
 import chromadb
 

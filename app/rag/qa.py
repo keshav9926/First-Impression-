@@ -1,21 +1,11 @@
-# app/rag/qa.py — the "G" in RAG: generate an answer grounded in retrieved chunks.
-#
-# CALL FLOW:
-#   main.py: ask() → answer(question, hits)
-#     where `hits` came from store.search() — the top-k relevant chunks.
-#   answer() numbers the chunks, builds the prompt, then dispatches to ONE
-#   provider based on settings.llm_provider:
-#       "groq"      → _ask_groq()      (free tier, high rate-limits — default for /ask)
-#       "gemini"    → _ask_gemini()    (free tier — daily quota burns fast)
-#       "anthropic" → _ask_claude()    (paid — switch via .env when funded)
-#
-# This file is the ONLY place that talks to an LLM for Q&A. That isolation is
-# why swapping providers was a small, local change — the crawler, chunker,
-# embeddings, and store never knew it happened.
-#
-# The system prompt applies hard rule #2 (grounded output only) at the prompt
-# level: answer ONLY from the excerpts, cite every claim, admit when the
-# answer isn't there. Phase 5 adds automated checks that verify compliance.
+"""
+===============================================================================
+FILE: app/rag/qa.py
+ORIGIN      : app.rag.pipeline (retrieve) / app.main (POST /ask)
+PURPOSE     : Grounded LLM question answering with strict excerpt citation constraints
+DESTINATION : app.main (Returns JSON answer payload with citation mappings)
+===============================================================================
+"""
 
 import anthropic
 import groq as groq_sdk

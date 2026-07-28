@@ -1,29 +1,11 @@
-# app/mcp_server.py — Phase 7: First Impression as an MCP server.
-#
-# Exposes the SAME pipeline the FastAPI app serves — crawl → ReAct report, and
-# grounded Q&A — behind the Model Context Protocol, so any MCP client (Claude
-# Desktop, Claude Code, an IDE) can call the analyzer as a tool. It is a second
-# front door onto app/, NOT a reimplementation: every tool below delegates to
-# the exact functions main.py's HTTP endpoints call (_ingest_site,
-# generate_report, pipeline.retrieve + qa.answer), so the two can never drift.
-#
-# TRANSPORT: stdio (the standard for local MCP clients). The protocol owns
-# stdout, so NOTHING here may print to it — logging goes to stderr, and the
-# tools return structured dicts rather than writing anything.
-#
-# RUN:
-#     uv run python -m app.mcp_server
-#
-# REGISTER (e.g. Claude Desktop / Claude Code MCP config):
-#     "first-impression": {
-#         "command": "uv",
-#         "args": ["run", "python", "-m", "app.mcp_server"],
-#         "cwd": "<absolute path to this repo>"
-#     }
-#
-# The heavy dependencies (Voyage, the LLM pool, ChromaDB) are the same ones the
-# API needs; a report call blocks for ~2-4 min under free-tier pacing, exactly
-# as POST /report does.
+"""
+===============================================================================
+FILE: app/mcp_server.py
+ORIGIN      : MCP Clients (Claude Desktop, Antigravity IDE, Cursor)
+PURPOSE     : Model Context Protocol (MCP) server adapter exposing tools over stdio
+DESTINATION : app.main._ingest_site / app.agent.report / app.rag.qa
+===============================================================================
+"""
 
 import logging
 
@@ -41,6 +23,13 @@ mcp = FastMCP("first-impression")
 
 
 def _report_keys_missing() -> str | None:
+    """
+    Validate Server API Keys
+
+    ORIGIN      : analyze_first_impression tool startup
+    PURPOSE     : Check if VOYAGE_API_KEY and NVIDIA_API_KEY exist before running report tasks.
+    DESTINATION : Returns missing key error message or None if valid.
+    """
     """Return a human-readable reason if the server lacks a key the report path
     needs, else None. Mirrors main.py's _require_keys guards so an MCP client
     gets the same clear 'set this key' message a curl user would."""

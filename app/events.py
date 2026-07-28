@@ -1,23 +1,11 @@
-# app/events.py — a tiny in-process event bus for streaming progress to the UI.
-#
-# WHY: the pipeline (crawl → ingest → explore → panel → synthesize) runs for
-# 2-4 minutes and, until now, told the caller NOTHING until it finished. The
-# dashboard needs to show each step live. Rather than thread an `emit` argument
-# through a dozen function signatures, components call events.emit(...) freely;
-# a contextvar decides whether anyone is listening.
-#
-# DEFAULT = NO-OP: if no collector is active (the plain /report path, tests,
-# the CLI), emit() does nothing and costs almost nothing. Only the SSE endpoint
-# activates a collector, so instrumentation is invisible everywhere else.
-#
-# THREADING: the streaming endpoint runs the sync pipeline in ONE worker thread
-# and calls collector() INSIDE that thread, so the contextvar is visible to
-# every pipeline call on that thread. Events are pushed to a thread-safe Queue
-# the SSE generator drains.
-#
-# CALL FLOW:
-#   fetcher/groq_driver/panel → events.emit("tool", name=...)   (producers)
-#   main.analyze_stream → with events.collector() as q: ...      (consumer)
+"""
+===============================================================================
+FILE: app/events.py
+ORIGIN      : Pipeline components (app.ingestion, app.agent)
+PURPOSE     : In-process async event bus for streaming live progress to the Web UI
+DESTINATION : app.main streaming endpoints / SSE Clients
+===============================================================================
+"""
 
 import contextvars
 import queue

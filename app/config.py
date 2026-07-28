@@ -1,29 +1,25 @@
-# app/config.py — typed application configuration.
-#
-# WHERE THIS IS USED: every module imports the shared `settings` object below —
-#   main.py      → app_name, environment (and the two key checks)
-#   robots.py    → crawler_user_agent
-#   fetcher.py   → crawler_user_agent, request_delay_seconds
-#   embeddings.py→ voyage_api_key, embedding_model
-#   store.py     → chroma_dir, collection_name
-#   qa.py        → anthropic_api_key, claude_model
-#
-# HOW IT WORKS: Settings() runs ONCE, when this module is first imported
-# (at server startup) — not per request. Pydantic reads environment
-# variables (and a local .env file in dev; matching is case-insensitive,
-# so ANTHROPIC_API_KEY in .env fills anthropic_api_key here), validates
-# them, and freezes the result. Bad config fails the BOOT, not a user
-# request three hours later.
+"""
+===============================================================================
+FILE: app/config.py
+ORIGIN      : Environment variables (.env) / Server Startup
+PURPOSE     : Centralized Pydantic application settings & validation singleton
+DESTINATION : All app subsystems (app.main, app.ingestion, app.rag, app.agent)
+===============================================================================
+"""
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    """
+    Application Settings Singleton
+
+    ORIGIN      : Loaded automatically from environment variables & .env
+    PURPOSE     : Provides validated configuration parameters for APIs, LLM pools, VLM models, and vector storage.
+    DESTINATION : Exported as global `settings` instance for system-wide consumption.
+    """
     # Reads variables from a `.env` file if present; real environment
     # variables always take precedence over the file.
-    # extra="ignore": .env may hold keys this app doesn't map (e.g. an
-    # experimental provider key, or a malformed name) — ignore them instead of
-    # failing to boot. Only fields declared below are read.
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )

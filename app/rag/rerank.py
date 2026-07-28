@@ -1,23 +1,11 @@
-# app/rag/rerank.py — cross-encoder re-ranking via Voyage's rerank API.
-# The precision stage of retrieval: candidates found by hybrid search get
-# re-scored by a model that reads question + chunk TOGETHER.
-#
-# CALL FLOW:
-#   main.py: ask() → rerank(question, candidates, top_k)
-#   Input came from: fusion.rrf() (the ~10 fused candidates).
-#   Output (top_k hits with a calibrated "relevance" score) goes back to
-#   main.py, which applies settings.min_relevance — the "no relevant
-#   content" gate — before anything reaches the LLM.
-#
-# WHY A SEPARATE MODEL: embeddings are a BI-encoder — question and chunk are
-# encoded separately and compared as vectors (fast: chunk vectors are
-# precomputed; coarse: the two texts never "see" each other). A RERANKER is a
-# CROSS-encoder — one transformer reads "question [SEP] chunk" as a single
-# input and outputs a relevance score (sharp: full attention between every
-# question word and every chunk word; slow: must run per question-chunk pair).
-# So the classic funnel: cheap search over everything → expensive scoring
-# over the top few. Its 0..1 score is also CALIBRATED, which is what makes a
-# fixed relevance threshold meaningful — raw vector distances are not.
+"""
+===============================================================================
+FILE: app/rag/rerank.py
+ORIGIN      : app.rag.pipeline (retrieve)
+PURPOSE     : Cross-encoder neural reranking & Shifted Sigmoid score calibration
+DESTINATION : app.rag.pipeline / app.main (Filters hits against min_relevance threshold)
+===============================================================================
+"""
 
 import math
 import time

@@ -1,18 +1,11 @@
-# app/ingestion/render.py — headless-browser rendering for JS sites (Phase 6).
-#
-# WHY: fetcher's static httpx fetch sees only the HTML shell of a JS-rendered
-# site (Framer/Webflow/Next). trynarrative.com → 368 chars, asha.health → 95.
-# Playwright drives real Chromium, waits for the page's JS to hydrate, then
-# hands back the FULLY-RENDERED HTML — the same DOM a human sees. Everything
-# downstream (trafilatura, heading/CTA/link extraction) is unchanged; only the
-# HTML source improves.
-#
-# USED ONLY AS A FALLBACK: fetcher.crawl() runs the cheap static path first and
-# escalates here only when _is_thin_extraction trips — a browser is ~1000x
-# heavier than an HTTP GET, so most (server-rendered) sites never touch this.
-#
-# CALL FLOW:
-#   fetcher.crawl() → with browser_session() as b: render_html(b, url)
+"""
+===============================================================================
+FILE: app/ingestion/render.py
+ORIGIN      : app.ingestion.fetcher (when dynamic JS rendering is forced/needed)
+PURPOSE     : Headless Chromium execution via Playwright for SPA JS rendering & DOM extraction
+DESTINATION : app.ingestion.fetcher (Returns rendered HTML and visible DOM text)
+===============================================================================
+"""
 
 import logging
 from contextlib import contextmanager

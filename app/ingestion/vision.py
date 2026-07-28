@@ -1,18 +1,11 @@
-# app/ingestion/vision.py — read product screenshots the text extractor can't.
-#
-# The HTML text pipeline is BLIND to images: it can note that a visual exists
-# (alt/filename) but not what it SHOWS. A site whose product story lives in
-# dashboard screenshots therefore reads as "no product UI visible" — a
-# confident false negative (caught live on vortexify.ai, 2026-07-19).
-#
-# This module captions a page's product images with a vision-language model
-# (settings.vision_model — omni-30b, the 2026-07-19 bake-off winner: 2.3s/img,
-# read exact chart contents). Captions ride back into chunk metadata via
-# main.py, so the agent, personas, and judge all SEE what a screenshot depicts.
-#
-# FAIL-OPEN by design: vision is an enrichment layer, never a gate. Any download
-# or model error on an image is logged and skipped — ingestion always proceeds.
-# A hard cost cap (settings.vision_max_images_total) bounds calls per ingest.
+"""
+===============================================================================
+FILE: app/ingestion/vision.py
+ORIGIN      : app.main (ingest_site)
+PURPOSE     : VLM Multimodal image captioning for web page product screenshots
+DESTINATION : app.main (Attaches captions into chunk metadata)
+===============================================================================
+"""
 
 import base64
 import io

@@ -1,23 +1,11 @@
-# app/ingestion/fetcher.py — polite, same-domain crawler.
-# Enforces the "public data only" rule in code, not in prompts:
-#   1. every URL is checked against robots.txt BEFORE fetching (robots.py)
-#   2. a fixed delay between requests (rate limiting — never hammer a site)
-#   3. never leaves the starting domain, never follows login/signup paths
-# Page HTML is reduced to readable article text with trafilatura (nav bars,
-# cookie banners, footers stripped) — clean text in = good retrieval later.
-#
-# CALL FLOW (who calls what):
-#
-#   main.py: ingest()                      ← the /ingest endpoint
-#       └── crawl(start_url, max_pages)    ← entry point of THIS file
-#             ├── robots.is_allowed(url)   ← permission check (robots.py)
-#             ├── httpx client.get(url)    ← download the HTML
-#             ├── trafilatura.extract()    ← HTML → readable text
-#             └── _extract_links()         ← find next URLs to visit
-#                   └── _LinkCollector     ← pulls every <a href> out of the HTML
-#
-#   crawl() returns a CrawlResult back to main.py, which then passes each
-#   page's text to chunker.chunk_text().
+"""
+===============================================================================
+FILE: app/ingestion/fetcher.py
+ORIGIN      : app.main (ingest / analyze_stream) / app.mcp_server
+PURPOSE     : Dual-mode HTTP & Playwright web crawler with link extraction & HTML parsing
+DESTINATION : app.ingestion.chunker / app.ingestion.vision / app.rag.store
+===============================================================================
+"""
 
 import logging
 import time
