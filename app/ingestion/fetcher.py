@@ -65,6 +65,14 @@ class Page:
     # also see WHAT the visual shows (app/ingestion/vision.py).
     images: list[str] = field(default_factory=list)
     image_urls: list[str] = field(default_factory=list)
+    # Demo videos are the other half of that blind spot, and the more damaging
+    # one: "is there a product demo?" is a question the report must answer, and
+    # a <video>-only check saw none of them (marketing sites ship demos as
+    # YouTube/Vimeo/Loom/Wistia iframes). `video_urls` are direct media files we
+    # can actually send to the omni VLM (app/ingestion/vision.py caption_videos);
+    # third-party embeds can't be downloaded, so we caption their poster frame
+    # via image_urls instead and label the embed in `images`.
+    video_urls: list[str] = field(default_factory=list)
 
 
 # Detecting a JS-rendered site (SPA / Framer / Webflow) where the static HTML
@@ -264,21 +272,153 @@ _MAX_IMAGES = 15
 _MAX_IMAGE_CHARS = 90
 _IMG_NOISE_HINTS = ("logo", "icon", "favicon", "avatar", "sprite", "badge", "arrow", "pixel")
 
+# Video extraction. Detecting only <video>/<source type=video> found almost
+# nothing in practice: product demos live in third-party player iframes, and
+# self-hosted hero videos are usually lazy-mounted (data-src) so the tag has no
+# src at parse time. Each host below maps to a display name; the player URL also
+# yields a poster/thumbnail we CAN read even when the video itself is off-limits.
+_MAX_VIDEOS = 5
+_VIDEO_HOSTS = {
+    "youtube.com": "YouTube", "youtube-nocookie.com": "YouTube", "youtu.be": "YouTube",
+    "vimeo.com": "Vimeo", "loom.com": "Loom", "wistia.com": "Wistia",
+    "wistia.net": "Wistia", "vidyard.com": "Vidyard", "videoask.com": "VideoAsk",
+    "dailymotion.com": "Dailymotion", "hubspotvideo.com": "HubSpot",
+}
+_VIDEO_EXTENSIONS = (".mp4", ".webm", ".mov", ".m4v", ".ogv")
+# Lazy-mount attributes: a hero <video> often carries no src until JS runs, and
+# click-to-play embeds park the player URL in a data-* attribute on a wrapper.
+_VIDEO_SRC_ATTRS = ("src", "href", "data-src", "data-lazy-src", "data-url",
+                    "data-video-url", "data-video-src", "data-vimeo-url")
+# A bare youtube.com/@company link is a social footer, not a demo. Only URLs
+# that name ONE video count as a video on the page.
+_SPECIFIC_VIDEO_MARKERS = ("/watch", "/embed/", "youtu.be/", "/share/", "/video/",
+                           "player.vimeo.com/", "/medias/")
+
+
+def _video_hit(tag: str, a: dict[str, str | None]) -> tuple[str, str, str] | None:
+    """(label, media_url, player_url) if this tag is a video, else None.
+    `media_url` is a directly downloadable media file when there is one;
+    `player_url` is a third-party player page/iframe, which we cannot download
+    but can often reduce to a poster frame."""
+    urls = [(a.get(k) or "").strip() for k in _VIDEO_SRC_ATTRS]
+    direct = next((u for u in urls if u.split("?")[0].lower().endswith(_VIDEO_EXTENSIONS)), "")
+
+    if tag in ("video", "source"):
+        return None  # handled statefully by _ImgCollector: one element, one video
+
+    for url in urls:
+        low = url.lower()
+        provider = next((p for h, p in _VIDEO_HOSTS.items() if h in low), "")
+        if not provider:
+            continue
+        # <a> is the loose case (a footer link to the company's channel is not a
+        # demo); iframes/embeds always point at one player, so they need no check.
+        if tag == "a" and not any(m in low for m in _SPECIFIC_VIDEO_MARKERS):
+            continue
+        title = (a.get("title") or "").strip()
+        label = f"[video: {provider} embed" + (f' — "{title[:60]}"' if title else "") + "]"
+        return label, "", url
+    if direct:
+        return f"[video: {direct.rsplit('/', 1)[-1].split('?')[0]}]", direct, ""
+    return None
+
+
+def _youtube_thumbnail(player_url: str) -> str:
+    """A YouTube player URL → its poster-frame JPEG, or "". We can't download
+    the video itself, but the thumbnail is a real frame of it and goes through
+    the ordinary image captioner — turning "a video exists" into "the video
+    shows the dashboard". hqdefault always exists; maxresdefault often 404s."""
+    low = player_url.lower()
+    if not any(h in low for h in ("youtube.com", "youtu.be", "youtube-nocookie.com")):
+        return ""
+    path = urlparse(player_url)
+    vid = ""
+    if "/embed/" in path.path:
+        vid = path.path.split("/embed/", 1)[1]
+    elif "youtu.be" in path.netloc:
+        vid = path.path.lstrip("/")
+    elif "v=" in path.query:
+        vid = path.query.split("v=", 1)[1].split("&")[0]
+    vid = vid.split("/")[0].split("?")[0]
+    return f"https://img.youtube.com/vi/{vid}/hqdefault.jpg" if vid else ""
+
 
 class _ImgCollector(HTMLParser):
     """Collect evidence that meaningful visuals exist: <img> alt/src (minus
-    obvious chrome) and any <video>/<source> presence."""
+    obvious chrome), plus every video on the page — self-hosted files, player
+    embeds, and the poster frames that let us see what they show."""
 
     def __init__(self) -> None:
         super().__init__()
         self.images: list[str] = []          # display labels (alt/filename)
         self.image_srcs: list[str] = []       # raw src of the SAME images, aligned
-        self.has_video = False
+        self.videos: list[str] = []           # labels: "[video: YouTube embed …]"
+        self.video_srcs: list[str] = []       # downloadable media files only
+        self.video_players: list[str] = []    # third-party player URLs (→ poster frames)
+        self._open_video: str | None = None   # src chosen for the <video> being parsed
+
+    def _note_video(self, label: str, media: str, player: str) -> None:
+        if label in self.videos or len(self.videos) >= _MAX_VIDEOS:
+            return
+        self.videos.append(label)
+        if media:
+            self.video_srcs.append(media)
+        if player:
+            self.video_players.append(player)
+
+    def _pick_source(self, url: str, declared_video: bool = False) -> None:
+        """A <video> lists the SAME content in several formats. Keep one, and
+        prefer mp4 — it is what the VLM decodes most reliably. Anything we can't
+        hand to a decoder (blob:, .m3u8 streams) is left out: the element still
+        counts as a video, it just has no file we can watch."""
+        if not url or not (declared_video or url.split("?")[0].lower().endswith(_VIDEO_EXTENSIONS)):
+            return
+        cur = self._open_video or ""
+        if not cur or (not cur.split("?")[0].lower().endswith(".mp4")
+                       and url.split("?")[0].lower().endswith(".mp4")):
+            self._open_video = url
+
+    def close_video(self) -> None:
+        """Emit the <video> element we were parsing as exactly one video. Called
+        at </video> and once more after feed(), for pages that never close it."""
+        if self._open_video is None:
+            return
+        src = self._open_video
+        name = src.rsplit("/", 1)[-1].split("?")[0] if src else "video element"
+        self._open_video = None
+        self._note_video(f"[video: {name}]", src, "")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "video":
+            self.close_video()
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         a = dict(attrs)
-        if tag == "video" or (tag == "source" and (a.get("type") or "").startswith("video")):
-            self.has_video = True
+        if tag == "video":
+            self.close_video()  # unclosed previous element — don't merge the two
+            self._open_video = ""  # "" = open, no source yet
+            for key in _VIDEO_SRC_ATTRS:
+                self._pick_source((a.get(key) or "").strip())
+            # The poster is a real frame of the demo — the cheapest way to see a
+            # video we may not be able to download. The embed equivalent (player
+            # thumbnail) is resolved in _extract_images.
+            if poster := (a.get("poster") or "").strip():
+                self.images.append(f"video poster ({poster.rsplit('/', 1)[-1].split('?')[0]})")
+                self.image_srcs.append(poster)
+            return
+        if tag == "source":
+            declared = (a.get("type") or "").startswith("video")
+            if self._open_video is not None:
+                for key in _VIDEO_SRC_ATTRS:
+                    self._pick_source((a.get(key) or "").strip(), declared)
+            elif declared:  # malformed page: a <source> with no <video> around it
+                self._open_video = ""
+                self._pick_source((a.get("src") or "").strip(), True)
+                self.close_video()
+            return
+        if tag in ("iframe", "embed", "a", "div"):
+            if hit := _video_hit(tag, a):
+                self._note_video(*hit)
             return
         if tag != "img":
             return
@@ -298,16 +438,23 @@ class _ImgCollector(HTMLParser):
         self.image_srcs.append(src)
 
 
-def _extract_images(html: str, base_url: str = "") -> tuple[list[str], list[str]]:
-    """(labels, urls) for substantive images (+ a video marker in labels),
+def _extract_images(html: str, base_url: str = "") -> tuple[list[str], list[str], list[str]]:
+    """(labels, image_urls, video_urls) for the substantive visuals on a page,
     deduped by label, document order. `labels` ride on Page.images → chunk
-    metadata; `urls` (absolute) ride on Page.image_urls → vision captioning.
-    Together they close the text-only blind spot around visuals."""
+    metadata; `image_urls` ride on Page.image_urls → vision captioning;
+    `video_urls` ride on Page.video_urls → video captioning. Together they close
+    the text-only blind spot around visuals."""
     collector = _ImgCollector()
     try:
         collector.feed(html)
     except Exception:
-        return [], []
+        return [], [], []
+    collector.close_video()  # a <video> the page never closed still counts
+
+    def _absolute(src: str) -> str:
+        abs_url = urljoin(base_url, src) if base_url else src
+        return abs_url if abs_url.startswith(("http://", "https://")) else ""
+
     seen: set[str] = set()
     labels, urls = [], []
     for label, src in zip(collector.images, collector.image_srcs):
@@ -315,14 +462,20 @@ def _extract_images(html: str, base_url: str = "") -> tuple[list[str], list[str]
             continue
         seen.add(label.lower())
         labels.append(label)
-        abs_url = urljoin(base_url, src) if base_url else src
-        if abs_url.startswith(("http://", "https://")):
+        if abs_url := _absolute(src):
             urls.append(abs_url)
         if len(labels) >= _MAX_IMAGES:
             break
-    if collector.has_video:
-        labels.insert(0, "[video element present]")
-    return labels, urls
+    # Videos lead the labels: "is there a product demo?" is its own question in
+    # the report, and it must not fall off the end of a 15-image list.
+    labels = collector.videos + labels
+    video_urls = [u for u in (_absolute(s) for s in collector.video_srcs) if u]
+    # Player embeds are undownloadable, but their poster frame is a real frame
+    # of the demo — send it down the image path so the VLM still sees it.
+    for player in collector.video_players:
+        if thumb := _youtube_thumbnail(_absolute(player) or player):
+            urls.append(thumb)
+    return labels, urls, video_urls
 
 
 def _extract_headings(html: str) -> list[str]:
@@ -429,7 +582,7 @@ def _crawl_loop(start_url: str, max_pages: int, fetch) -> CrawlResult:
             seed_text_chars = len(text)
             seed_html_chars = len(html)
         if text.strip():
-            labels, image_urls = _extract_images(html, base_url=url)
+            labels, image_urls, video_urls = _extract_images(html, base_url=url)
             pages.append(
                 Page(
                     url=url,
@@ -438,6 +591,7 @@ def _crawl_loop(start_url: str, max_pages: int, fetch) -> CrawlResult:
                     ctas=_extract_ctas(html),
                     images=labels,
                     image_urls=image_urls,
+                    video_urls=video_urls,
                 )
             )
             events.emit("crawl.page", url=url, chars=len(text))

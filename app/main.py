@@ -116,6 +116,14 @@ def _ingest_site(url: str, max_pages: int) -> IngestResponse:
     images_seen = sum(len(getattr(p, "image_urls", []) or []) for p in result.pages)
     images_captioned = sum(len(v) for v in captions_by_page.values())
 
+    # Demo videos: the omni VLM watches the self-hosted ones, so the report can
+    # say what the demo SHOWS instead of only that a video is on the page.
+    video_captions = vision.caption_videos(result.pages)
+    videos_seen = sum(len(getattr(p, "video_urls", []) or []) for p in result.pages)
+    videos_captioned = sum(len(v) for v in video_captions.values())
+    for page_url, caps in video_captions.items():
+        captions_by_page.setdefault(page_url, []).extend(caps)
+
     # Each chunk carries: url (citations), headings (read_page section map),
     # ctas (signup/demo actions), images (visual evidence: alt/filename labels +
     # any vision captions), extraction_warning (JS-thin caveat). Chroma metadata
@@ -152,6 +160,8 @@ def _ingest_site(url: str, max_pages: int) -> IngestResponse:
         injection_lines_removed=injection_lines_removed,
         images_seen=images_seen,
         images_captioned=images_captioned,
+        videos_seen=videos_seen,
+        videos_captioned=videos_captioned,
     )
     events.emit("ingest.done", **summary.model_dump())
     return summary

@@ -151,6 +151,37 @@ def test_extract_ctas_matches_signup_family():
     assert ctas == ["Try for free", "Book a Demo", "Sign in"]
 
 
+def test_extract_images_finds_embedded_and_self_hosted_videos():
+    """Demo videos are the visual the report cares most about, and marketing
+    sites ship them as player iframes / lazy data-* mounts, not <video> tags."""
+    from app.ingestion.fetcher import _extract_images
+
+    html = """
+    <img src="/dash.png" alt="Dashboard overview" width="1200" height="800">
+    <iframe title="Product demo" src="https://www.youtube.com/embed/dQw4w9WgXcQ?rel=0"></iframe>
+    <div data-video-url="https://player.vimeo.com/video/76979871"></div>
+    <video poster="/poster.jpg">
+      <source src="/media/hero.webm">
+      <source src="/media/hero.mp4" type="video/mp4">
+    </video>
+    <a href="https://www.loom.com/share/abc123">Watch the walkthrough</a>
+    <a href="https://youtube.com/@acme">Our channel</a>   <!-- social, not a demo -->
+    """
+    labels, image_urls, video_urls = _extract_images(html, base_url="https://acme.com/")
+
+    videos = [v for v in labels if v.startswith("[video")]
+    assert videos == [
+        '[video: YouTube embed — "Product demo"]',
+        "[video: Vimeo embed]",
+        "[video: hero.mp4]",   # one element = one video, mp4 preferred over webm
+        "[video: Loom embed]",
+    ]
+    # Only the downloadable file is watchable; embeds fall back to poster frames.
+    assert video_urls == ["https://acme.com/media/hero.mp4"]
+    assert "https://acme.com/poster.jpg" in image_urls
+    assert "https://img.youtube.com/vi/dQw4w9WgXcQ/hqdefault.jpg" in image_urls
+
+
 def test_extract_headings_pulls_h1_to_h3_in_order():
     from app.ingestion.fetcher import _extract_headings
 

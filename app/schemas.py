@@ -46,6 +46,11 @@ class IngestResponse(BaseModel):
     # vision is off/unconfigured or the pages carried no product imagery.
     images_seen: int = 0
     images_captioned: int = 0
+    # Same visibility for demo videos the VLM actually watched. Only downloadable
+    # media files count here — third-party player embeds are captioned through
+    # their poster frame and show up in the images_* counters instead.
+    videos_seen: int = 0
+    videos_captioned: int = 0
 
 
 class AskRequest(BaseModel):

@@ -145,9 +145,9 @@ Built one phase at a time, with a review gate between each — RAG foundations f
 - **Tech:** Langfuse · Docker.
 
 ### Phase 9 · Vision
-- **Shipped:** a **VLM** captions product screenshots the text extractor is blind to, with a multi-model failover chain.
-- **Why:** sites communicate through images; without captions FIE would emit "no product screenshots" on a page full of them — a false negative that destroys trust. Captions ride into chunk metadata so the agent, personas, and judge all *see* what a screenshot shows.
-- **Tech:** `nemotron-3-nano-omni-30b` VLM (→ 2-model failover).
+- **Shipped:** a **VLM** captions product screenshots the text extractor is blind to, with a multi-model failover chain — and *watches the demo video*: self-hosted videos are sent to the omni model as `video_url`, while YouTube/Vimeo/Loom/Wistia embeds (undownloadable) are captioned through their poster frame.
+- **Why:** sites communicate through images; without captions FIE would emit "no product screenshots" on a page full of them — a false negative that destroys trust. Captions ride into chunk metadata so the agent, personas, and judge all *see* what a screenshot shows. The demo video is often a landing page's single most informative asset, and detecting only `<video>` tags found almost none of them.
+- **Tech:** `nemotron-3-nano-omni-30b` VLM — images (→ 2-model failover) and video (the one model on our NVIDIA account that accepts video input).
 
 ### Phase 10 · Reliability & delivery
 - **Shipped:** a multi-model **NVIDIA failover pool** (circuit breaker, per-minute vs per-day 429 intelligence, DEGRADED-deployment recovery, adaptive timeouts) · a product-substance prompt reframe · **Netlify** publishing.

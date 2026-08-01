@@ -122,6 +122,120 @@ def _caption_one(client, http: httpx.Client, url: str) -> str | None:
     return None
 
 
+# --- Video ---------------------------------------------------------------
+# A demo video is often the clearest statement a company makes about what the
+# product does, and knowing only that a <video> tag exists tells the report
+# nothing. omni-30b accepts `video_url` parts (remote URL or inline base64), so
+# the same failover machinery above carries over — only the payload changes.
+_VIDEO_PROMPT = (
+    "This is a video from a B2B software company's public website. In 2-3 sentences, "
+    "state concretely what it shows — the product UI and workflow demonstrated, the "
+    "specific screens/data visible, and what a first-time visitor would learn the "
+    "product does. If it is purely decorative b-roll with no product in it, reply "
+    "exactly: 'non-product video'."
+)
+_VIDEO_CAPTION_CHARS = 700  # richer than an image caption: a demo carries more
+
+
+def _try_video_model(client, model: str, video_url: str):
+    """Caption one video with ONE model. Same contract as _try_model: caption
+    str, None ('nothing worth surfacing'), or _FAILED (→ try the next model)."""
+    for attempt in range(settings.vision_retries_per_model):
+        try:
+            resp = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": [
+                    {"type": "text", "text": _VIDEO_PROMPT},
+                    {"type": "video_url", "video_url": {"url": video_url}},
+                ]}],
+                max_tokens=400,
+                temperature=0.0,
+                timeout=settings.video_timeout_s,
+            )
+            cap = (resp.choices[0].message.content or "").strip()
+            if not cap or "non-product video" in cap.lower():
+                return None
+            return cap[:_VIDEO_CAPTION_CHARS]
+        except Exception as exc:
+            if _is_transient(exc) and attempt < settings.vision_retries_per_model - 1:
+                time.sleep(2.0 * (attempt + 1))
+                continue
+            logger.info("vision: %s failed on video (%s: %s)", model,
+                        type(exc).__name__, str(exc)[:160])
+            return _FAILED
+    return _FAILED
+
+
+def _inline_video(http: httpx.Client, url: str) -> str | None:
+    """Download the video and return it as a data: URL, or None if it is too
+    big / unfetchable. Only used when NVIDIA's own fetch of the URL failed
+    (hotlink protection, signed CDN, private network)."""
+    try:
+        raw = http.get(url).content
+    except Exception as exc:
+        logger.info("vision: video fetch failed %s (%s)", url, type(exc).__name__)
+        return None
+    if len(raw) > settings.video_max_bytes:
+        logger.info("vision: video too large (%.1fMB) — skipping %s", len(raw) / 1e6, url)
+        return None
+    mime = "video/webm" if url.split("?")[0].lower().endswith(".webm") else "video/mp4"
+    return f"data:{mime};base64," + base64.b64encode(raw).decode()
+
+
+def _caption_video(client, http: httpx.Client, url: str) -> str | None:
+    """Remote URL first (no download, no size ceiling — NVIDIA fetches it), then
+    inline bytes as the fallback. Returns a caption or None."""
+    for model in settings.video_models:
+        result = _try_video_model(client, model, url)
+        if result is not _FAILED:
+            return result
+    data_url = _inline_video(http, url)
+    if not data_url:
+        return None
+    for model in settings.video_models:
+        result = _try_video_model(client, model, data_url)
+        if result is not _FAILED:
+            return result
+    logger.info("vision: all models failed for video %s", url)
+    return None
+
+
+def caption_videos(pages) -> dict[str, list[str]]:
+    """{page_url: [captions]} for the self-hosted demo videos across the crawl.
+
+    Called by main.py ingest, right after caption_pages. Third-party embeds
+    (YouTube/Vimeo/Loom) can't be downloaded and never reach here — the fetcher
+    routes their poster frame through the image path instead. Never raises."""
+    if not settings.video_enabled or not settings.nvidia_api_key:
+        return {}
+    total = settings.video_max_total
+    if total <= 0:
+        return {}
+
+    client = _client()
+    out: dict[str, list[str]] = {}
+    with httpx.Client(timeout=90, follow_redirects=True,
+                      headers={"User-Agent": "Mozilla/5.0 (FIE vision)"}) as http:
+        for page in pages:
+            if total <= 0:
+                break
+            caps: list[str] = []
+            for url in getattr(page, "video_urls", [])[: settings.video_max_per_page]:
+                if total <= 0:
+                    break
+                total -= 1
+                cap = _caption_video(client, http, url)
+                if cap:
+                    name = url.rsplit("/", 1)[-1].split("?")[0]
+                    caps.append(f"{name} (video) — {cap}")
+            if caps:
+                out[page.url] = caps
+    if out:
+        logger.info("vision: watched %d video(s) across %d page(s)",
+                    sum(len(v) for v in out.values()), len(out))
+    return out
+
+
 def caption_pages(pages) -> dict[str, list[str]]:
     """{page_url: [captions]} for the product images across the crawl.
 

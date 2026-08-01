@@ -119,6 +119,22 @@ class Settings(BaseSettings):
     ]
     vision_retries_per_model: int = 3  # backoff-retries on transient 503/504/429
 
+    # --- Video: watch the demo, don't just note that one exists ---
+    # A product demo video is often the single most informative asset on a
+    # landing page, and the pipeline was blind to its CONTENT. omni-30b is the
+    # one model on our NVIDIA account that accepts `video_url` parts (verified
+    # 2026-08-01 against integrate.api.nvidia.com: cosmos-reason2-8b and
+    # nvidia/vila are in the catalog but 404 for this account — not enabled).
+    # It takes both a remote URL and inline base64; we prefer the remote URL
+    # (no download, no payload ceiling) and fall back to inline for videos
+    # NVIDIA's fetcher can't reach. 5MB inline verified working.
+    video_enabled: bool = True
+    video_models: list[str] = ["nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"]
+    video_max_per_page: int = 3      # hero + demo + one more; the rest is noise
+    video_max_total: int = 10
+    video_max_bytes: int = 24_000_000  # skip full-length films; demos are short
+    video_timeout_s: int = 180         # decode+reason is far slower than an image
+
     # Two report pipelines (2026-07-19 bake-off). "→" = failover: try the next
     # model if one errors OR produces no valid report.
     #   deep   (no time budget): glm-5.2 → v4-pro → v4-flash → nemotron
