@@ -194,6 +194,31 @@ def test_split_into_sections_declines_when_unstructured():
     assert _split_into_sections(page, "<p>no headings here</p>") == [page]
 
 
+def test_pages_examined_counts_pages_not_sections():
+    """Reading three sections of /docs is reading ONE page. The report must not
+    claim a 15-page site has 42 pages — it is describing that site's shape."""
+    from app.agent.groq_driver import pages_from_steps
+
+    steps = [
+        {"tool": "read_page", "args": {"url": "https://acme.com/docs"}},
+        {"tool": "read_page", "args": {"url": "https://acme.com/docs#connectors"}},
+        {"tool": "read_page", "args": {"url": "https://acme.com/docs#sync-jobs"}},
+        {"tool": "read_page", "args": {"url": "https://acme.com/pricing"}},
+        {"tool": "search_content", "args": {"query": "onboarding"}},
+    ]
+    assert pages_from_steps(steps) == ["https://acme.com/docs", "https://acme.com/pricing"]
+
+
+def test_citation_to_a_section_anchor_is_grounded():
+    """Sections cite url#anchor; that must verify against the stored parent page
+    rather than being dropped as a hallucinated url."""
+    from app.agent import grounding
+
+    assert grounding._normalize("https://acme.com/docs#connectors") == grounding._normalize(
+        "https://acme.com/docs"
+    )
+
+
 def test_list_pages_nests_sections_under_their_parent(monkeypatch):
     chunks = [
         {"id": "chunk-0", "text": "a", "url": "https://acme.com/"},

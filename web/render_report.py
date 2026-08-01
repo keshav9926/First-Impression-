@@ -59,7 +59,10 @@ def _sentences(text: str, n: int) -> str:
 
 def build_report_obj(key: str, row: dict) -> dict:
     rep = row["report"]
-    pages = row.get("pages_examined", [])
+    # A long page is ingested as one entry per heading section (url#anchor).
+    # Those are parts of a page, not pages — collapse them so the report says
+    # "15 pages", not "42". Order preserved; a section's parent stands in for it.
+    pages = list(dict.fromkeys(u.split("#")[0] for u in row.get("pages_examined", [])))
     ingest = row.get("ingest", {})
     score, potential = _score(rep)
     domain = re.sub(r"https?://(www\.)?", "", row["url"]).strip("/")

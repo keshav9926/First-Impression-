@@ -277,9 +277,19 @@ def synthesize(context: str, extra_context: str = "") -> FirstImpressionReport:
 
 
 def pages_from_steps(steps_log: list[dict]) -> list[str]:
-    """Distinct urls the agent actually read, from the steps log."""
+    """Distinct PAGES the agent actually read, from the steps log.
+
+    A page too long for one read is ingested as one entry per heading section
+    (url#anchor). Reading three sections of /docs is reading one page, so the
+    fragment is dropped here — otherwise the report claims a 15-page site has
+    42 pages, misdescribing the very thing it is reporting on. The full section
+    urls stay in steps_log for debugging."""
     return sorted(
-        {s["args"]["url"] for s in steps_log if s["tool"] == "read_page" and "url" in s["args"]}
+        {
+            s["args"]["url"].split("#")[0]
+            for s in steps_log
+            if s["tool"] == "read_page" and "url" in s["args"]
+        }
     )
 
 

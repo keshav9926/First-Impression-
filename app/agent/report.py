@@ -83,7 +83,10 @@ def generate_report(
     # Phase 8: trace the whole run to Langfuse (no-op unless configured). Every
     # LLM call below — explore, personas, judge, synthesis — nests under this
     # span automatically via llm_pool.chat's record_generation.
-    pages = sorted({c.get("url", "") for c in chunks if c.get("url")})
+    # A page too long to read in one call is stored as one entry per heading
+    # section (url#anchor). Those are subdivisions OF a page, not pages — the
+    # site has as many pages as it has distinct URLs before the fragment.
+    pages = sorted({c["url"].split("#")[0] for c in chunks if c.get("url")})
     # use_mode selects the failover chain for EVERY llm_pool.chat call below
     # (explore, personas, synthesis, judge) — no need to thread `mode` through.
     with llm_pool.use_mode(mode), observability.report_trace(
