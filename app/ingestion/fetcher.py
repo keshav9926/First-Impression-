@@ -8,6 +8,7 @@ DESTINATION : app.ingestion.chunker / app.ingestion.vision / app.rag.store
 """
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
@@ -536,19 +537,37 @@ def _extract_links(html: str, base_url: str, domain: str) -> list[str]:
     return links
 
 
-def _static_fetch(client: httpx.Client, url: str) -> tuple[str, str]:
-    """One page via static HTTP. Returns (html, text) or ("", "") on failure.
+def _static_fetch(client: httpx.Client, url: str) -> tuple[str, str, str]:
+    """One page via static HTTP. Returns (html, text, final_url) or ("","","")
+    on failure. final_url is the post-redirect address — the caller resolves
+    links against it, never against what we asked for.
     text = trafilatura article extraction (favor_precision strips nav/footer —
     added after a nav-debris chunk scored 0.490 in the 2026-07-12 eval)."""
     try:
         response = client.get(url)
     except httpx.HTTPError:
-        return "", ""
+        return "", "", ""
     content_type = response.headers.get("content-type", "")
     if response.status_code != 200 or "text/html" not in content_type:
-        return "", ""
+        return "", "", ""
     html = response.text
-    return html, (trafilatura.extract(html, favor_precision=True) or "")
+    return html, (trafilatura.extract(html, favor_precision=True) or ""), str(response.url)
+
+
+# Soft 404s: SPAs routinely serve "Not Found" with a 200 status, so the status
+# check above can't catch them. A real page is never both this short and this
+# shaped — the length guard is what keeps the pattern from eating real content.
+_SOFT_404_MAX_CHARS = 200
+_SOFT_404 = re.compile(
+    r"^\s*(?:http\s*status:?\s*)?(?:404|error\s*404)\b|^\s*(?:page\s+)?not\s+found\b",
+    re.IGNORECASE,
+)
+
+
+def _is_error_page(text: str) -> bool:
+    """Is this an error page wearing a 200? Only judged on very short text."""
+    stripped = text.strip()
+    return bool(stripped) and len(stripped) <= _SOFT_404_MAX_CHARS and bool(_SOFT_404.match(stripped))
 
 
 def _crawl_loop(start_url: str, max_pages: int, fetch) -> CrawlResult:
@@ -568,6 +587,7 @@ def _crawl_loop(start_url: str, max_pages: int, fetch) -> CrawlResult:
     skipped_by_robots = 0
     seed_text_chars = 0  # the FIRST fetched page's text/html — the thin signal
     seed_html_chars = 0
+    seed_done = False  # has the seed resolved? (fixes `domain` after a redirect)
 
     while queue and len(pages) < max_pages:
         url = queue.pop(0)  # FRONT of the queue = breadth-first
@@ -577,10 +597,31 @@ def _crawl_loop(start_url: str, max_pages: int, fetch) -> CrawlResult:
             skipped_by_robots += 1
             continue
 
-        html, text = fetch(url)  # static HTTP or headless render
+        html, text, final_url = fetch(url)  # static HTTP or headless render
+        # Redirects change a page's IDENTITY. vortexify.ai redirects only "/"
+        # to www and hard-404s every other apex path, so resolving links
+        # against the REQUESTED url queued 14 dead URLs (2026-08-01). Adopt
+        # where we actually landed: the seed's host becomes the crawl's
+        # domain, and each page's links resolve against its final address.
+        if final_url:
+            landed = urlparse(final_url).netloc
+            if not seed_done and landed:
+                domain = landed  # the seed redirected — that IS the site
+            elif landed and landed != domain:
+                continue  # this page redirected off-site; not ours to report on
+            canonical_final = _canonical(final_url)
+            if canonical_final != url:
+                if canonical_final in seen:
+                    continue  # already crawled under its post-redirect URL
+                seen.add(canonical_final)
+                url = canonical_final
         if seed_html_chars == 0 and html:
             seed_text_chars = len(text)
             seed_html_chars = len(html)
+            seed_done = True
+        if _is_error_page(text):
+            logger.info("skipping soft-404 at %s: %r", url, text.strip()[:60])
+            continue
         if text.strip():
             labels, image_urls, video_urls = _extract_images(html, base_url=url)
             pages.append(

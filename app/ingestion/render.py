@@ -37,26 +37,35 @@ def browser_session():
             browser.close()
 
 
-def render_page(browser, url: str) -> tuple[str, str]:
-    """Return (rendered_html, visible_text) for `url`, or ("", "") on failure.
+def render_page(browser, url: str) -> tuple[str, str, str]:
+    """Return (rendered_html, visible_text, final_url), or ("", "", "") on
+    failure or any HTTP error status.
 
-    Two outputs on purpose:
+    Three outputs on purpose:
       - html  → link / heading / CTA extraction (needs the tag structure)
       - text  → the page's VISIBLE text via inner_text("body")
+      - final_url → where we actually landed, after redirects
     We use inner_text, NOT trafilatura, for the body: trafilatura's article
     heuristics collapse to near-nothing on component-soup JS sites (Framer:
     368 chars from a 3MB DOM), while inner_text returns what a human actually
     sees (1700+). The cost is some nav/footer noise in the text — acceptable on
     JS sites where the alternative is no content at all.
 
-    Returns ("", "") (never raises) so one bad page skips like a static fetch
-    error. Waits for network-idle so client-side content has hydrated first.
+    Returns ("", "", "") (never raises) so one bad page skips like a static
+    fetch error. Waits for network-idle so client-side content has hydrated.
     """
     page = browser.new_page(user_agent=settings.crawler_user_agent)
     try:
         # domcontentloaded is fast + reliable; networkidle alone hangs the full
         # nav budget on pages with persistent analytics/long-poll sockets.
-        page.goto(url, wait_until="domcontentloaded", timeout=_NAV_TIMEOUT_MS)
+        response = page.goto(url, wait_until="domcontentloaded", timeout=_NAV_TIMEOUT_MS)
+        # The static path rejects non-200s; this one did not, so a 404's error
+        # page ("HTTP Status: 404 (not found)") was non-empty text and got
+        # chunked, embedded and stored as if it were content. On vortexify.ai
+        # that was 14 of 15 "pages" — 78% of the corpus (caught 2026-08-01).
+        if response is not None and response.status >= 400:
+            logger.info("render: %s returned HTTP %d — skipping", url, response.status)
+            return "", "", ""
         try:
             page.wait_for_load_state("networkidle", timeout=_IDLE_SETTLE_MS)
         except Exception:
@@ -79,9 +88,11 @@ def render_page(browser, url: str) -> tuple[str, str]:
             page.wait_for_timeout(600)  # let freshly-triggered images finish loading
         except Exception:
             pass
-        return page.content(), page.inner_text("body")
+        # page.url is the POST-redirect address — the caller resolves this
+        # page's links against it, so a redirect can't queue dead URLs.
+        return page.content(), page.inner_text("body"), page.url
     except Exception as exc:
         logger.warning("render failed for %s: %s", url, exc)
-        return "", ""
+        return "", "", ""
     finally:
         page.close()
