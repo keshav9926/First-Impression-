@@ -126,6 +126,11 @@ class CrawlResult:
     skipped_by_robots: int
     extraction_ratio: float = 1.0
     thin_extraction: bool = False
+    # Pages ACTUALLY fetched, before oversized ones were split into section
+    # pages. `pages` may be longer; this is what the site really has, and it is
+    # what the report should call "pages" (a 62k-char /docs is one page with 40
+    # sections, not 40 pages).
+    source_page_count: int = 0
 
 
 def _canonical(url: str) -> str:
@@ -554,6 +559,113 @@ def _static_fetch(client: httpx.Client, url: str) -> tuple[str, str, str]:
     return html, (trafilatura.extract(html, favor_precision=True) or ""), str(response.url)
 
 
+# Section splitting. A docs page can dwarf the rest of a site — vortexify's
+# /docs is 61,920 chars against 36,092 for its other 14 pages combined — and no
+# single tool result can represent it. Rather than truncate it (the agent saw
+# 6.5% of it) or summarize it (lossy, and summaries can't be cited), we split it
+# at its own headings: each section becomes a page in its own right, at a real
+# #anchor URL. Everything downstream — chunker, embeddings, retrieval, citations
+# — is unchanged; it simply sees more pages, each comfortably readable. The
+# payoff is citations: 37 of /docs' 40 headings resolve to a real element id, so
+# a claim cites the exact section instead of a 62k-char page.
+SECTION_SPLIT_MIN_CHARS = 15_000  # only pages a single read can't represent
+_MIN_SECTION_CHARS = 500          # smaller than this is a fragment, not a page
+_MIN_SECTIONS = 3                 # fewer than this isn't a structure worth using
+
+
+def _slugify(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+
+
+def _anchor_for(heading: str, ids: list[str], used: set[str]) -> str:
+    """The page's own element id for this heading, so the section URL is a
+    LINK THAT WORKS. Exact slug first, then an id that ends with it (docs
+    generators prefix ids with their parent: 'core-concepts-data-flow' for
+    'Data flow'). Falls back to the bare slug — still a unique URL, just not a
+    jump target."""
+    slug = _slugify(heading) or "section"
+    anchor = slug if slug in ids else next((i for i in ids if i.endswith("-" + slug)), slug)
+    if anchor in used:  # two sections sharing a name — keep URLs distinct
+        n = 2
+        while f"{anchor}-{n}" in used:
+            n += 1
+        anchor = f"{anchor}-{n}"
+    used.add(anchor)
+    return anchor
+
+
+def _split_into_sections(page: Page, html: str) -> list[Page]:
+    """Split an oversized page into one Page per heading section, plus the
+    parent page carrying whatever precedes the first section. Returns [page]
+    unchanged when the page has no usable structure."""
+    headings = _extract_headings(html)
+    if len(headings) < _MIN_SECTIONS:
+        return [page]
+    text = page.text
+
+    # Anchor each heading at its LAST occurrence, then order by POSITION IN THE
+    # TEXT. The first occurrence is the sidebar nav entry — vortexify's /docs
+    # lists all 40 headings in a nav block before any content, so anchoring on
+    # first occurrence produced 40 "sections" with a median size of 25 chars.
+    # Ordering by position rather than by tag order matters just as much: the
+    # nav lists headings in its own order, and requiring anchors to advance in
+    # tag order threw away 37 of 40 (measured 2026-08-01) — leaving one 45,808
+    # char "section". Position order recovers all 40, covering 95.5% of the page.
+    anchored = sorted(
+        (idx, heading) for heading in headings if (idx := text.rfind(heading)) >= 0
+    )
+    if len(anchored) < _MIN_SECTIONS:
+        return [page]
+
+    # Cut the text at those anchors, folding any fragment too small to stand
+    # alone into the section before it — every character stays somewhere.
+    cuts: list[tuple[str, str]] = []  # (heading, body)
+    for n, (start, heading) in enumerate(anchored):
+        end = anchored[n + 1][0] if n + 1 < len(anchored) else len(text)
+        body = text[start:end].strip()
+        if not body:
+            continue
+        if len(body) < _MIN_SECTION_CHARS and cuts:
+            cuts[-1] = (cuts[-1][0], cuts[-1][1] + "\n" + body)
+        else:
+            cuts.append((heading, body))
+    if len(cuts) < _MIN_SECTIONS:
+        return [page]
+
+    ids = sorted(set(re.findall(r"""id=["']([^"']+)["']""", html)))
+    used: set[str] = set()
+    # The parent keeps the page's opening (and its visuals/CTAs, which belong to
+    # the page as a whole); sections carry the body text exactly once, so
+    # nothing is embedded twice.
+    intro = text[: anchored[0][0]].strip()
+    out = [
+        Page(
+            url=page.url,
+            text=intro or page.text[:_MIN_SECTION_CHARS],
+            headings=[h for _, h in anchored],
+            ctas=page.ctas,
+            images=page.images,
+            image_urls=page.image_urls,
+            video_urls=page.video_urls,
+        )
+    ]
+    for heading, body in cuts:
+        out.append(
+            Page(
+                url=f"{page.url}#{_anchor_for(heading, ids, used)}",
+                text=body,
+                headings=[heading],
+                # Inherited so a section read never reports "no visuals here"
+                # about a page full of them; the URLs stay on the parent so the
+                # vision captioner does not caption the same image per section.
+                ctas=page.ctas,
+                images=page.images,
+            )
+        )
+    logger.info("split %s (%d chars) into %d section pages", page.url, len(text), len(cuts))
+    return out
+
+
 # Soft 404s: SPAs routinely serve "Not Found" with a 200 status, so the status
 # check above can't catch them. A real page is never both this short and this
 # shaped — the length guard is what keeps the pattern from eating real content.
@@ -584,12 +696,16 @@ def _crawl_loop(start_url: str, max_pages: int, fetch) -> CrawlResult:
     queue = [start]
     seen = {start}
     pages: list[Page] = []
+    # Sections are a VIEW of a page we already fetched, not new crawl targets —
+    # they must not eat the max_pages budget, or one big docs page would end the
+    # crawl. The budget counts pages actually fetched.
+    source_pages = 0
     skipped_by_robots = 0
     seed_text_chars = 0  # the FIRST fetched page's text/html — the thin signal
     seed_html_chars = 0
     seed_done = False  # has the seed resolved? (fixes `domain` after a redirect)
 
-    while queue and len(pages) < max_pages:
+    while queue and source_pages < max_pages:
         url = queue.pop(0)  # FRONT of the queue = breadth-first
 
         # Gate: robots.txt permission (rule #1). No permission → no request.
@@ -624,16 +740,21 @@ def _crawl_loop(start_url: str, max_pages: int, fetch) -> CrawlResult:
             continue
         if text.strip():
             labels, image_urls, video_urls = _extract_images(html, base_url=url)
-            pages.append(
-                Page(
-                    url=url,
-                    text=text,
-                    headings=_extract_headings(html),
-                    ctas=_extract_ctas(html),
-                    images=labels,
-                    image_urls=image_urls,
-                    video_urls=video_urls,
-                )
+            page = Page(
+                url=url,
+                text=text,
+                headings=_extract_headings(html),
+                ctas=_extract_ctas(html),
+                images=labels,
+                image_urls=image_urls,
+                video_urls=video_urls,
+            )
+            source_pages += 1
+            # Too big for one read → publish it as its own sections instead.
+            pages.extend(
+                _split_into_sections(page, html)
+                if len(text) > SECTION_SPLIT_MIN_CHARS
+                else [page]
             )
             events.emit("crawl.page", url=url, chars=len(text))
         # Feed new same-domain links into the queue (works for JS nav too —
@@ -650,6 +771,7 @@ def _crawl_loop(start_url: str, max_pages: int, fetch) -> CrawlResult:
         pages=pages,
         skipped_by_robots=skipped_by_robots,
         thin_extraction=_is_thin_extraction(seed_text_chars, seed_html_chars),
+        source_page_count=source_pages,
     )
 
 
@@ -670,12 +792,15 @@ def crawl(start_url: str, max_pages: int) -> CrawlResult:
     #   - too few pages: link discovery found almost nothing, which on an SPA
     #     means the nav is JS-injected and a static fetch can't see it (this is
     #     why collectwise analyzed only 1 real page). Rendering finds those links.
-    if not settings.force_render and not result.thin_extraction and len(result.pages) >= _MIN_STATIC_PAGES:
+    # Counted on pages FETCHED, not published: one big page split into 40
+    # sections must not read as "we found 40 pages, no need to render".
+    if (not settings.force_render and not result.thin_extraction
+            and result.source_page_count >= _MIN_STATIC_PAGES):
         return result
 
     reason = ("force_render enabled" if settings.force_render else
               "thin static extraction" if result.thin_extraction else
-              f"only {len(result.pages)} page(s) found (JS-injected nav?)")
+              f"only {result.source_page_count} page(s) found (JS-injected nav?)")
     logger.info("%s (%s) — escalating to headless render", reason, start_url)
     events.emit("render.escalate", url=start_url)
     try:

@@ -75,7 +75,7 @@ def test_read_page_truncation_shows_section_map(monkeypatch):
     long_chunks = [
         {
             "id": "chunk-0",
-            "text": "word " * 2000,  # ~10K chars → forces truncation
+            "text": "word " * 4000,  # 20K chars → past READ_PAGE_MAX_CHARS (15K)
             "url": "https://acme.com/docs",
             "headings": "Setup · Deployment · Access & roles",
         }
@@ -149,6 +149,63 @@ def test_extract_ctas_matches_signup_family():
     """
     ctas = _extract_ctas(html)
     assert ctas == ["Try for free", "Book a Demo", "Sign in"]
+
+
+def test_split_into_sections_anchors_on_body_not_nav():
+    """A docs page lists every heading in its sidebar BEFORE any content, so
+    anchoring on a heading's first occurrence yields 25-char 'sections'. We
+    anchor on the last, and cite the page's own element ids."""
+    from app.ingestion.fetcher import Page, _split_into_sections
+
+    body_a = "Data flows in from your warehouse on a schedule. " * 20
+    body_b = "Each run is queued, retried on failure, and logged. " * 20
+    body_c = "Permissions gate who can see which dashboard. " * 20
+    text = (
+        "Documentation\nConnectors\nSync jobs\nAccess roles\n"  # sidebar nav
+        f"Connectors\n{body_a}\nSync jobs\n{body_b}\nAccess roles\n{body_c}"
+    )
+    html = """
+    <h1>Connectors</h1><h2>Sync jobs</h2><h2>Access roles</h2>
+    <div id="connectors"></div><div id="core-sync-jobs"></div><div id="access-roles"></div>
+    """
+    page = Page(url="https://acme.com/docs", text=text, headings=[], ctas=["Sign up"])
+    out = _split_into_sections(page, html)
+
+    assert [p.url for p in out] == [
+        "https://acme.com/docs",
+        "https://acme.com/docs#connectors",
+        "https://acme.com/docs#core-sync-jobs",  # id suffix-matched to "Sync jobs"
+        "https://acme.com/docs#access-roles",
+    ]
+    # Sections carry the BODY text, not the sidebar entry.
+    assert body_a.strip() in out[1].text
+    assert len(out[1].text) > 500
+    # The parent keeps the opening and the page-level visuals/CTAs.
+    assert out[0].text.startswith("Documentation")
+    assert all(p.ctas == ["Sign up"] for p in out)
+    # Every character of the body survives somewhere — splitting must not drop text.
+    assert body_c.strip() in out[3].text
+
+
+def test_split_into_sections_declines_when_unstructured():
+    from app.ingestion.fetcher import Page, _split_into_sections
+
+    page = Page(url="https://acme.com/x", text="flat text " * 500, headings=[], ctas=[])
+    assert _split_into_sections(page, "<p>no headings here</p>") == [page]
+
+
+def test_list_pages_nests_sections_under_their_parent(monkeypatch):
+    chunks = [
+        {"id": "chunk-0", "text": "a", "url": "https://acme.com/"},
+        {"id": "chunk-1", "text": "b", "url": "https://acme.com/docs"},
+        {"id": "chunk-2", "text": "c", "url": "https://acme.com/docs#connectors"},
+        {"id": "chunk-3", "text": "d", "url": "https://acme.com/docs#sync-jobs"},
+    ]
+    monkeypatch.setattr(tools.store, "all_chunks", lambda: chunks)
+    out = tools.execute_tool("list_pages", {})
+    # 2 real pages, not 4 — the site's shape is the report's subject.
+    assert "(2 pages" in out
+    assert "    - https://acme.com/docs#connectors" in out
 
 
 def test_extract_images_finds_embedded_and_self_hosted_videos():

@@ -153,7 +153,9 @@ def _ingest_site(url: str, max_pages: int) -> IngestResponse:
     stored = store.replace_all(chunks, vectors)
 
     summary = IngestResponse(
-        pages_fetched=len(result.pages),
+        # Pages FETCHED, not stored: an oversized page split into section pages
+        # is still one page of the site.
+        pages_fetched=result.source_page_count or len(result.pages),
         chunks_stored=stored,
         skipped_by_robots=result.skipped_by_robots,
         extraction_warning=result.thin_extraction,

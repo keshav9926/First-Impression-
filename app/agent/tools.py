@@ -19,11 +19,17 @@ from app.rag import pipeline, store
 logger = logging.getLogger("first_impression")
 
 # Tool outputs are BOUNDED so the ReAct history can't grow past a provider's
-# per-request context/token budget (Groq free tier is only ~12K tokens/minute,
-# and the whole conversation is resent every step). Bounded reads also make the
-# agent cheaper and faster on every provider. If a page is truncated, the agent
-# is told to use search_content to dig into specifics instead.
-READ_PAGE_MAX_CHARS = 4000
+# per-request context/token budget (the whole conversation is resent every
+# step). If a page is truncated, the agent is told to use search_content to dig
+# into specifics instead.
+# Raised 4000 → 15000 (2026-08-01) on measurement: vortexify's 14 non-docs pages
+# total 36,092 chars — the agent can read EVERY one of them in full for ~9K
+# tokens. At 4000 it saw only the first 23% of the pages that mattered, and on
+# a real page that opening slice is nav and hero copy. The one page this cap
+# could not have covered (/docs, 61,920 chars) is now split into section pages
+# upstream, so nothing reaching here needs truncating. Groq's ~12K tokens/minute
+# free tier was the original reason for 4000; the pool is NVIDIA-only now.
+READ_PAGE_MAX_CHARS = 15000
 SEARCH_TOP_K = 3
 SEARCH_SNIPPET_CHARS = 1200
 # min_relevance is a single threshold tuned on ONE site — a real topic that
@@ -53,7 +59,32 @@ def _list_pages() -> str:
             "not mention X' as a friction point or unanswered question; only "
             "describe what you POSITIVELY observed.\n\n"
         )
-    return warning + "Pages available to analyze:\n" + "\n".join(f"- {u}" for u in urls)
+    # A page too big to read in one call is stored as one page per heading
+    # section (url#anchor). Those are VIEWS of their parent, not separate
+    # pages — listed flat, a 15-page site reads as 50 pages, which is a false
+    # impression of exactly the thing this report describes. So: nest them, and
+    # state both counts.
+    sections_by_page: dict[str, list[str]] = {}
+    for u in urls:
+        base, _, fragment = u.partition("#")
+        sections_by_page.setdefault(base, [])
+        if fragment:
+            sections_by_page[base].append(u)
+    lines = []
+    for base in sorted(sections_by_page):
+        lines.append(f"- {base}")
+        for section in sections_by_page[base]:
+            lines.append(f"    - {section}")
+    total_sections = sum(len(s) for s in sections_by_page.values())
+    header = f"Pages available to analyze ({len(sections_by_page)} pages"
+    header += (
+        f"; the indented entries are sections of the page above them — "
+        f"{total_sections} of them, split out because that page was too long to "
+        f"read in one call. Read them like any other page):\n"
+        if total_sections
+        else "):\n"
+    )
+    return warning + header + "\n".join(lines)
 
 
 def _read_page(url: str) -> str:
