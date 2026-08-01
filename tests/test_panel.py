@@ -33,6 +33,15 @@ def test_personas_are_three_and_distinct():
 
 
 def test_graph_explores_once_and_fans_out(monkeypatch):
+    # pages_examined is verified against the INGESTED pages (so a model guessing
+    # /about on a site without one isn't counted as having read it), so this
+    # test must own its store instead of reading whatever chroma_data holds.
+    from app.agent import tools
+
+    monkeypatch.setattr(
+        tools.store, "all_chunks",
+        lambda: [{"id": "chunk-0", "text": "t", "url": "https://a.com/"}],
+    )
     explore_calls = {"n": 0}
 
     def fake_explore():

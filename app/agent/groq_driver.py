@@ -279,18 +279,24 @@ def synthesize(context: str, extra_context: str = "") -> FirstImpressionReport:
 def pages_from_steps(steps_log: list[dict]) -> list[str]:
     """Distinct PAGES the agent actually read, from the steps log.
 
-    A page too long for one read is ingested as one entry per heading section
-    (url#anchor). Reading three sections of /docs is reading one page, so the
-    fragment is dropped here — otherwise the report claims a 15-page site has
-    42 pages, misdescribing the very thing it is reporting on. The full section
-    urls stay in steps_log for debugging."""
-    return sorted(
-        {
-            s["args"]["url"].split("#")[0]
-            for s in steps_log
-            if s["tool"] == "read_page" and "url" in s["args"]
-        }
-    )
+    Two things are filtered out, both of which inflated this count:
+
+    - Pages that DO NOT EXIST. The model guesses plausible urls (/about, /blog,
+      /careers), read_page answers "No page found", and counting the ATTEMPT
+      claimed 39 pages examined on a site with 18 (measured 2026-08-02).
+      resolve_page_url is the same resolution read_page itself performs, so a
+      recovered slug ("pricing") still counts and a miss never does.
+    - Section anchors. A page too long for one read is ingested as one entry
+      per heading section (url#anchor); reading three sections of /docs is
+      reading one page, not three.
+
+    The full, unfiltered call log stays in steps_log for debugging."""
+    from app.agent.tools import resolve_page_url
+
+    read_urls = [
+        s["args"]["url"] for s in steps_log if s["tool"] == "read_page" and "url" in s["args"]
+    ]
+    return sorted({r.split("#")[0] for r in map(resolve_page_url, read_urls) if r})
 
 
 def generate() -> tuple[FirstImpressionReport, list[dict], list[str]]:

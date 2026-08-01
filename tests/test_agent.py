@@ -194,16 +194,24 @@ def test_split_into_sections_declines_when_unstructured():
     assert _split_into_sections(page, "<p>no headings here</p>") == [page]
 
 
-def test_pages_examined_counts_pages_not_sections():
-    """Reading three sections of /docs is reading ONE page. The report must not
-    claim a 15-page site has 42 pages — it is describing that site's shape."""
+def test_pages_examined_counts_only_real_pages_read(monkeypatch):
+    """Two ways this count lied. Sections: reading three sections of /docs is
+    reading ONE page. Ghosts: a model guessing /about on a site without one had
+    the ATTEMPT counted — 39 pages examined on a site with 18 (2026-08-02)."""
     from app.agent.groq_driver import pages_from_steps
 
+    chunks = [
+        {"id": "chunk-0", "text": "a", "url": "https://acme.com/docs"},
+        {"id": "chunk-1", "text": "b", "url": "https://acme.com/docs#connectors"},
+        {"id": "chunk-2", "text": "c", "url": "https://acme.com/pricing"},
+    ]
+    monkeypatch.setattr(tools.store, "all_chunks", lambda: chunks)
     steps = [
         {"tool": "read_page", "args": {"url": "https://acme.com/docs"}},
         {"tool": "read_page", "args": {"url": "https://acme.com/docs#connectors"}},
-        {"tool": "read_page", "args": {"url": "https://acme.com/docs#sync-jobs"}},
-        {"tool": "read_page", "args": {"url": "https://acme.com/pricing"}},
+        {"tool": "read_page", "args": {"url": "https://acme.com/about"}},    # ghost
+        {"tool": "read_page", "args": {"url": "https://acme.com/careers"}},  # ghost
+        {"tool": "read_page", "args": {"url": "pricing"}},   # bare slug — recovered
         {"tool": "search_content", "args": {"query": "onboarding"}},
     ]
     assert pages_from_steps(steps) == ["https://acme.com/docs", "https://acme.com/pricing"]

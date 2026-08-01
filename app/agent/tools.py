@@ -87,6 +87,35 @@ def _list_pages() -> str:
     return warning + header + "\n".join(lines)
 
 
+def resolve_page_url(url: str, all_chunks: list[dict] | None = None) -> str | None:
+    """The INGESTED page a read_page(url) argument actually refers to, or None
+    if there is no such page.
+
+    Models often pass the wrong string instead of the exact URL list_pages
+    returned — a bare slug ("pricing"), or a hallucinated placeholder domain
+    ("https://example.com/pricing"). Recover instead of wasting a step by
+    matching on the LAST path segment against stored URLs. Only an UNAMBIGUOUS
+    match is accepted; ambiguous → None, and the caller asks for the exact URL.
+
+    Shared by _read_page and by pages_from_steps, which reports how much of the
+    site was really read: a model that guesses /about, /blog and /careers on a
+    site with none of them must not have those counted as pages examined.
+    """
+    all_chunks = store.all_chunks() if all_chunks is None else all_chunks
+    available = sorted({c["url"] for c in all_chunks})
+    if url in available:
+        return url
+    # Reduce whatever was passed to its last path segment: bare slug stays
+    # itself; "https://example.com/pricing" → "pricing"; root/"home" → "".
+    slug = urlparse(url).path.strip("/").split("/")[-1].lower() if "/" in url else url.strip().lower()
+    if slug in ("", "home", "index"):
+        # Root page = a URL with an empty path (scheme://host/).
+        candidates = [u for u in available if not urlparse(u).path.strip("/")]
+    else:
+        candidates = [u for u in available if u.rstrip("/").lower().endswith("/" + slug)]
+    return candidates[0] if len(candidates) == 1 else None
+
+
 def _read_page(url: str) -> str:
     """Observation for read_page(url): the full readable text of one page.
 
@@ -94,31 +123,27 @@ def _read_page(url: str) -> str:
     so concatenating a page's chunks reconstructs the page as a user reads it.
     """
     all_chunks = store.all_chunks()
+    resolved = resolve_page_url(url, all_chunks)
+    url = resolved or url
     page_chunks = [c for c in all_chunks if c["url"] == url]
 
-    # Models often pass the wrong string instead of the exact URL list_pages
-    # returned — a bare slug ("pricing"), or a hallucinated placeholder domain
-    # ("https://example.com/pricing"). Recover instead of wasting a step by
-    # matching on the LAST path segment against stored URLs. Only accept an
-    # UNAMBIGUOUS match; ambiguous → ask for the exact URL.
     if not page_chunks:
         available = sorted({c["url"] for c in all_chunks})
-        # Reduce whatever was passed to its last path segment: bare slug stays
-        # itself; "https://example.com/pricing" → "pricing"; root/"home" → "".
-        slug = urlparse(url).path.strip("/").split("/")[-1].lower() if "/" in url else url.strip().lower()
-        if slug in ("", "home", "index"):
-            # Root page = a URL with an empty path (scheme://host/).
-            candidates = [u for u in available if not urlparse(u).path.strip("/")]
-        else:
-            candidates = [u for u in available if u.rstrip("/").lower().endswith("/" + slug)]
-        if len(candidates) == 1:
-            url = candidates[0]
-            page_chunks = [c for c in all_chunks if c["url"] == url]
-
-    if not page_chunks:
-        available = sorted({c["url"] for c in all_chunks})
+        # This is a failed GUESS by the model, and it must not become evidence.
+        # On vortexify (2026-08-02) the agent invented /about, /capabilities,
+        # /how-it-works and /launch from footer LABELS, got this message six
+        # times, and reported "several primary footer links lead to no
+        # substantive page" as a friction point — a claim about the site built
+        # entirely out of its own wrong urls. Nothing here says anything about
+        # the site, so say so explicitly.
         return (
-            f"No page found at {url!r}. Use the EXACT url from list_pages. "
+            f"No page found at {url!r} — this url was never part of this site's "
+            "crawl, so it is almost certainly one you guessed rather than one "
+            "that exists. This is NOT evidence about the site: do not report it "
+            "as a broken link, a dead page, or missing content. Only the urls "
+            "below exist; a page absent from that list was never fetched, which "
+            "is not the same as the site not having it.\n"
+            f"Use the EXACT url from list_pages. "
             "Available pages are:\n"
             + "\n".join(f"- {u}" for u in available)
         )
