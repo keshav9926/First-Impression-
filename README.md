@@ -35,7 +35,8 @@ This is **not** a chatbot, **not** single-shot RAG, and **not** a LangChain demo
 
 ## 1. What it does
 
-- **Crawls** any public site (robots-compliant), **headless-renders** JS/SPA pages, and **reads product screenshots** with a vision model — so nothing on the page is invisible to it.
+- **Crawls** any public site (robots-compliant), **headless-renders** JS/SPA pages, **reads product screenshots** and **watches demo videos** with a vision model — so nothing on the page is invisible to it.
+- **Splits pages too long to read in one pass** into their own heading sections, each at a real `#anchor` URL — so a 62,000-character docs page is fully readable *and* citable down to the section, instead of being truncated to its first few thousand characters.
 - **Explores** the site as an autonomous **ReAct agent** (it decides what to read and search, up to 40 steps), then judges the same evidence through a **3-persona panel** — technical evaluator · business buyer · first-time user.
 - **Synthesizes** a structured `FirstImpressionReport` — product identity, likely new-user journey, friction, standout strengths, open questions, and forward-looking improvement ideas.
 - **Self-verifies** every claim against its cited page and **drops anything unsupported** — the failure mode is a shorter report, never a wronger one.
@@ -50,12 +51,15 @@ This is **not** a chatbot, **not** single-shot RAG, and **not** a LangChain demo
 ```
 URL ──► robots.txt gate ──► Crawl (httpx, BFS, same-domain)
                               │  always headless-render (Playwright) so JS/SPA
-                              ▼  nav + product screenshots are actually captured
-                     Vision (VLM captions product screenshots, 3-model failover)
+                              │  nav + product screenshots are actually captured
+                              ▼  redirect-aware identity · non-200 + soft-404 dropped
+                     Split oversized pages at their headings ──► page#anchor sections
+                              ▼
+                     Vision (VLM captions screenshots + watches videos, 3-model failover)
                               ▼
                      Sanitize (prompt-injection scrub)
                               ▼
-                     Chunk (~1600 chars, overlap; heading/CTA/image metadata)
+                     Chunk (~1600 chars, overlap; heading/CTA/visual metadata)
                               ▼
                      Embed (NVIDIA nemotron-3-embed-1b, 2048-dim) ──► Chroma (local, persistent)
                               ▼
@@ -86,6 +90,7 @@ URL ──► robots.txt gate ──► Crawl (httpx, BFS, same-domain)
 | Explore / personas / synthesis | NVIDIA failover chain (mode-selected — see [§6](#6-reliability-engineering)) |
 | Groundedness judge | Gemini `3.1-flash-lite`, temperature 0, fail-open |
 | Vision (screenshot captions) | `nemotron-3-nano-omni-30b` → 2-model VLM failover |
+| Video (demo-video understanding) | `nemotron-3-nano-omni-30b` via `video_url` — the only model on the account that accepts video |
 | Embeddings | `nvidia/nemotron-3-embed-1b` (2048-dim) |
 | Rerank | Voyage `rerank-2.5-lite` cross-encoder (calibrated 0–1 gate) |
 | Observability | Langfuse (optional; hard no-op without keys) |
@@ -105,6 +110,7 @@ Built one phase at a time, with a review gate between each — RAG foundations f
 - **Shipped:** robots-compliant crawler → chunk → embed → Chroma, plus grounded Q&A over one company's site.
 - **Why:** if the crawler can't see it, the whole system is blind to it — ingestion quality caps everything downstream.
 - **Key decisions:** BFS crawl (mirrors how a visitor fans out; O(V+E), hard-capped at 300 pages) · **custom paragraph-aware chunker** at ~1600 chars with tail overlap (`RecursiveCharacterTextSplitter` from LangChain is the standard drop-in alternative — the custom version keeps the path light and fully inspectable) · robots.txt checked **first**, fail-closed.
+- **A page's identity is where it LANDS, not what was requested.** A site whose apex redirects only `/` to `www` and 404s every other apex path made link-resolution-against-the-requested-url produce 14 dead URLs; the render path then stored their 404 bodies as page text, and **78% of the vector corpus became "HTTP Status: 404 (not found)"**. Links now resolve against the post-redirect address, non-200s are rejected on *both* the static and rendered paths, and short "Not Found" bodies served with a 200 (routine on SPAs) are dropped by a length-guarded soft-404 check.
 - **Tech:** httpx · ChromaDB · embeddings.
 
 ### Phase 2 · Retrieval quality
@@ -117,6 +123,8 @@ Built one phase at a time, with a review gate between each — RAG foundations f
 - **Shipped:** a single **ReAct** agent (`list_pages` / `read_page` / `search_content`) that explores autonomously, then a schema-constrained, fully-cited report.
 - **Why:** the pages that matter differ per site (pricing here, security there); interleaving reason + act lets the agent adapt its path where a fixed pipeline can't. Bounded at 40 steps so exploration always terminates.
 - **Key decisions:** typed function-calling (valid actions, not regex-parsed strings) · explore-then-synthesize (creative exploration, then a *separate* strict JSON writer) · context trimming to bound token cost across 40 steps.
+- **`read_page` returns whole pages (15,000-char cap).** Measured on a real site, the 14 ordinary pages total 36,092 chars — the agent reads *every one in full* for ~9K tokens. The old 4,000-char cap existed for Groq's 12K-tokens/minute free tier and, on a real page, spent its budget on nav and hero copy before reaching anything substantive. Anything longer than the cap was split into section pages upstream, so nothing arrives here needing truncation.
+- **A failed URL guess is not evidence.** The agent invents plausible URLs (`/about`, `/careers`) from nav labels; `read_page` answering "no such page" was being counted as a page examined (**39 reported on an 18-page site**) and, worse, was written up as *"several primary footer links lead to no substantive page"* — a finding built entirely from its own wrong URLs, and verifiably false. Misses are now excluded from the coverage metric and the observation says outright that the URL was never crawled and says nothing about the site.
 - **Tech:** ReAct · tool-calling · Pydantic.
 
 ### Phase 4 · Persona panel
@@ -195,7 +203,9 @@ FIE is designed around one rule: **never say anything about a company that its p
 | **Citation verification** | Any claim citing a page that was never ingested is dropped in code, not by prompt |
 | **Groundedness judge** | A second adversarial LLM pass (Gemini, temp 0) reads each claim next to its cited page's actual text and drops unsupported ones |
 | **Contradiction check** | Uncited statements (persona impressions, open questions) are checked against *all* page text — "X is not mentioned" is dropped when the site does mention X (caught live: a claimed "no SOC 2" vs a site's "SOC 2 audit in progress") |
-| **Visual-evidence metadata** | Image alt-text/filenames and vision captions are captured as metadata, preventing false "no product screenshots" claims about pages full of dashboard shots |
+| **Visual-evidence metadata** | Image alt-text/filenames, video labels, and VLM captions are captured as metadata, preventing false "no product screenshots / no demo video" claims about pages full of them |
+| **Error-page rejection** | Non-200 responses are dropped on both the static and rendered paths, and 200-status "Not Found" bodies by a length-guarded pattern — so a dead link can never enter the corpus as content |
+| **Guessed-URL isolation** | `read_page` on a URL that was never crawled returns an explicit "this is not evidence about the site" observation, and is excluded from the pages-examined count — a model's wrong guess cannot become a finding or inflate coverage |
 | **Empty-evidence refusal** | A robots-blocked or dead crawl (store < 200 chars) produces HTTP 409, never a fabricated report |
 | **Relevance gate** | Retrieval refuses to answer when nothing clears the calibrated floor (fail-closed) |
 | **Judge determinism** | The fact-check pass runs at temperature 0 — same evidence, same verdicts |
@@ -208,17 +218,17 @@ FIE is designed around one rule: **never say anything about a company that its p
 
 ### Failover pipelines
 
-`→` means *"if this model fails or produces no valid report, run the next one."* Every LLM call in a run (explore, personas, synthesis) inherits the selected chain. Values below are the finalized chains from `app/config.py` (2026-07-19 bake-off) — the authoritative source.
+`→` means *"if this model fails or produces no valid report, run the next one."* Every LLM call in a run (explore, personas, synthesis) inherits the selected chain. **The chains live in `app/agent/llm_pool.py` (`_CHAINS`) — that dict is the authoritative source**, and this table is checked against it rather than against `config.py`, which holds the model *ids* but not the order.
 
-| Mode | Chain | Character |
+| Mode | Chain (`llm_pool._CHAINS`) | Character |
 |---|---|---|
-| **normal** (default) | DeepSeek-V4-Pro → V4-Flash → Nemotron-3-Ultra | Fast, reliable |
-| **deep** | **GLM-5.2** → DeepSeek-V4-Pro → V4-Flash → Nemotron-3-Ultra | Accuracy-first, no time budget |
+| **normal** (default) | Nemotron-3-Ultra → DeepSeek-V4-Pro → V4-Flash | Fast, reliable |
+| **deep** | DeepSeek-V4-Pro → V4-Flash → Nemotron-3-Ultra | Accuracy-first, no time budget |
 
-All models run on the NVIDIA API (one `nvapi-` key); Mistral-Medium is configured as an additional extraction fallback, and Gemini/Groq (separate keys) remain the *deep* rate-limit insurance. Two nuances worth knowing:
+All models run on the NVIDIA API (one `nvapi-` key). GLM-5.2 and Mistral-Medium remain callable providers but are in neither chain; Gemini (separate key) runs the groundedness judge. Three nuances worth knowing:
 
-- **`pool_prefer = "dspro"`** — DeepSeek-V4-Pro leads the normal chain (2026-07-18 bake-off: cleanest full-pipeline run, rich synthesis, ~8 min vs GLM's ~30).
-- **DeepSeek-V4-Pro cannot explore** (its tool-calling fails), so the pool *skips it* whenever tools are requested and uses GLM/Nemotron for the ReAct loop. It still leads persona/synthesis (no-tools) calls.
+- **`deep` is same-family failover** — V4-Pro falls through to V4-Flash before Nemotron catches the run, so a retry keeps the reasoning style rather than switching character mid-report.
+- **Every provider can explore.** DeepSeek-V4-Pro was once blocklisted from tool-calling; the 2026-07-18 bake-off had it run the explore loop cleanly (17 tool steps) on `integrate.api`, so the skip-list (`_NO_TOOLS`) is now empty. Re-add an id there if a model starts erroring on tool calls instead of serving.
 - **Quality-failover** — a synthesis whose JSON doesn't validate against the report schema falls through to the next model. "Responded" and "responded usefully" are different bars.
 
 ### The LLM pool
@@ -248,7 +258,7 @@ Free-tier LLM endpoints are flaky; a single report fires dozens of calls, so one
 - `run_report.py` / `run_deep_reports.py` / `rejudge_reports.py` — production runs on real companies + guard-pass re-application.
 
 ```bash
-uv run python -m pytest tests/ -q     # 85 tests, no network
+uv run python -m pytest tests/ -q     # 91 tests, no network
 ```
 
 Tests cover: crawling/robots, sanitizer, chunking, retrieval fusion + gate, agent failover chains, panel merging, judge (support + contradiction + truncation salvage + fail-open), API endpoints, SSE streaming, and MCP wrappers.
@@ -262,6 +272,7 @@ Tests cover: crawling/robots, sanitizer, chunking, retrieval fusion + gate, agen
 | **Playwright over Selenium** | Async API, auto-waiting, bundled Chromium, reliable screenshots | Slow + RAM-heavy → bounded by page/depth caps |
 | **Always render** | Static crawls silently mis-read SPA sites | Every page pays render latency (fine for a batch analyst) |
 | **Custom chunker over LangChain** | ~60 lines, paragraph-aware, fully inspectable, zero dep weight | Re-implements what `RecursiveCharacterTextSplitter` offers |
+| **Section-split long pages, don't summarize them** | A summary costs LLM calls, loses detail, and can't be cited. Splitting at the page's own headings is free, lossless, and yields deep-link citations (`/docs#connector-streams`) | Needs usable heading structure; a long page without headings still falls back to truncation |
 | **ChromaDB over FAISS** | First-class metadata + filtering + persistence (needed for citations) | Not distributed, not for billions of vectors — fine at one-site scale |
 | **Hybrid retrieval** | Dense and lexical search fail on opposite queries | Higher latency → mitigated by the RRF→rerank funnel |
 | **Cross-encoder rerank** | Highest-precision ranking; reads query+chunk together | O(candidates) → rerank 10, not 100 |
@@ -366,7 +377,7 @@ web/
   deploy.py          publish web/dist/ to Netlify
 evals/               bake-offs, retrieval evals, production runs, outreach builder
 reports/             verified report JSONs per company (git-ignored)
-tests/               85 offline tests
+tests/               91 offline tests
 ```
 
 ---
